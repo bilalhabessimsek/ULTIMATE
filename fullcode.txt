@@ -1,8 +1,8 @@
 ==========================================================================================
  ULTIMATE - TAM KAYNAK KODU
- Olusturma : 15.10.2026 22:34:11
- Surum     : 1.1.1
- Dosya     : 33  |  Satir: 4354
+ Olusturma : 16.10.2026 00:50:39
+ Surum     : 1.3.0
+ Dosya     : 33  |  Satir: 4872
  Proje     : Ultimate Asistan (Tauri 2 + React + TypeScript + Supabase)
 ==========================================================================================
 
@@ -13,7 +13,7 @@ NOTLAR
 
 ICINDEKILER
 ------------------------------------------------------------------------------------------
-  1. README.md  (162 satir)
+  1. README.md  (202 satir)
   2. index.html  (14 satir)
   3. package.json  (43 satir)
   4. tsconfig.json  (26 satir)
@@ -22,7 +22,7 @@ ICINDEKILER
   7. .env.example  (8 satir)
   8. .gitignore  (31 satir)
   9. src/main.tsx  (11 satir)
- 10. src/App.tsx  (292 satir)
+ 10. src/App.tsx  (296 satir)
  11. src/App.css  (24 satir)
  12. src/vite-env.d.ts  (2 satir)
  13. src/lib/auth.ts  (17 satir)
@@ -31,8 +31,8 @@ ICINDEKILER
  16. src/lib/utils.ts  (6 satir)
  17. src/components/CalendarView.tsx  (338 satir)
  18. src/components/GithubView.tsx  (691 satir)
- 19. src/components/LoginView.tsx  (151 satir)
- 20. src/components/NotesView.tsx  (426 satir)
+ 19. src/components/LoginView.tsx  (452 satir)
+ 20. src/components/NotesView.tsx  (554 satir)
  21. src/components/PlayerView.tsx  (1049 satir)
  22. src/components/ProjectsView.tsx  (163 satir)
  23. src/components/SetupWizard.tsx  (99 satir)
@@ -45,7 +45,7 @@ ICINDEKILER
  30. src-tauri/src/lib.rs  (251 satir)
  31. src-tauri/resources/README.md  (32 satir)
  32. src-tauri/.gitignore  (8 satir)
- 33. supabase/schema.sql  (234 satir)
+ 33. supabase/schema.sql  (279 satir)
 
 ==========================================================================================
  [1/33] DOSYA: README.md
@@ -181,6 +181,7 @@ Notların bulutta senkronize olması için tek seferlik kurulum gerekir:
 4. **Tablolar + politikalar + realtime:** `supabase/schema.sql` dosyasının **tamamını** SQL editöründe çalıştırın. Script;
    - `notes`, `calendar_events`, `playlists`, `music_state` tablolarını,
    - **hesaba bağlı** RLS politikalarını (`auth.uid() = user_id`),
+   - not resimleri için **`note-images` Storage bucket'ını** ve yazma/silme politikalarını (9. bölüm),
    - realtime yayın üyeliğini
    
    tek seferde kurar. Ayrıca 7. bölümü sahipsiz eski satırları ilk kullanıcıya bağlar ve bileşik anahtarları (`user_id + name/key`) oluşturur.
@@ -194,6 +195,30 @@ curl -s -H "apikey: $VITE_SUPABASE_ANON_KEY" \
   "https://<proje-ref>.supabase.co/rest/v1/notes?select=id&limit=1"
 ```
 Oturum açılmadığı için `[]` dönmesi **beklenen** davranıştır (RLS veriyi kapatıyor). Yazma denemesi `42501` ile reddedilmeli.
+
+### 🖼️ Not Resimleri (Supabase Storage)
+
+Notlara eklenen resimler artık **base64 olarak veritabanına gömülmez**. Resim Supabase Storage'daki `note-images` bucket'ına yüklenir, nota yalnızca kısa bir genel URL yazılır.
+
+**Neden?** Base64 gömme resmi ~%33 şişirir ve `notes.content` kolonunu megabaytlara çıkarır; ayrıca resim yalnızca o bilgisayarda kalırdı. Storage ile veritabanı küçük kalır ve resim **tüm cihazlarda** görünür.
+
+Üç yolla resim eklenebilir:
+
+| Yöntem | Nasıl |
+|---|---|
+| **Buton** | Araç çubuğundaki 🖼️ ikonu → dosya seçici |
+| **Yapıştır** | Ekran görüntüsünü kopyala → editörde **Ctrl+V** |
+| **Sürükle-bırak** | Resim dosyasını editörün üzerine bırak |
+
+Yükleme sırasında araç çubuğunda "Resim yükleniyor..." göstergesi çıkar; hata olursa kırmızı bir uyarı bandı görünür.
+
+**Kurulum:** `supabase/schema.sql` **9. bölümünü** (bucket + politikalar) bir kez çalıştırmak yeterlidir — dosyanın tamamını çalıştırdıysanız zaten kurulmuştur. Bucket'ı Dashboard'dan elle de açabilirsiniz:
+
+1. **Storage → New bucket** → ad: **`note-images`** → **Public bucket** açık → *Create*.
+2. **Policies** için yukarıdaki SQL'i çalıştırın (yazma/silme yalnızca kendi `<user_id>/` klasörüne izinlidir).
+
+> 🔒 Bucket **public** olduğu için bağlantıyı bilen resmi görüntüleyebilir (URL'ler rastgele ve tahmin edilemez). Kişisel kullanım için pratiktir; tam gizlilik istersen bucket'ı private yapıp imzalı URL üretimine geçebiliriz.
+> 📦 Ücretsiz plan Storage kotası 1 GB'dır. Tek resim üst sınırı uygulama tarafında **10 MB**.
 
 ---
 
@@ -210,6 +235,21 @@ Kurulum sırası önemli:
 > E-posta onayı zorunlu olsun istemiyorsan: Authentication → Sign In / Providers → Email → **Confirm email** kapalı olabilir. Kapalıysa hesap oluşturur oluşturmaz giriş yapılır.
 
 Oturum yerelde saklandığı için uygulama her açılışta tekrar giriş istemez; çıkış için sol menüdeki **çıkış (LogOut)** butonu kullanılır.
+
+### 🔁 Şifre Sıfırlama (bağlantı yapıştırma)
+
+Masaüstü uygulamasında e-posta bâglantısına tıklamak işe yaramaz (tarayıcıya `http://localhost:3000`'e gider). Bu yüzden uygulama, e-postadaki bağlantının **içindeki token**'ı okur:
+
+1. Giriş ekranı → **Şifremi unuttum** → e-postanı gir → *Sıfırlama Bağlantısı Gönder*.
+2. Gelen e-postada **"Reset password"** yazısına sağ tık → **Bağlantıyı kopyala**.
+3. Uygulamadaki kutuya yapıştır + yeni şifreyi belirle → *Şifreyi Güncelle*.
+
+Uygulama yapıştırılan metinden `token=` değerini ayıklar ve `supabase.auth.verifyOtp({ token_hash, type: 'recovery' })` ile oturumu açar, ardından şifreyi günceller.
+
+> **Neden kod (OTP) değil?** 6 haneli kod yöntemi e-posta şablonuna `{{ .Token }}` eklemeyi gerektirir; ancak Supabase ücretsiz planında **varsayılan mail servisi kullanılırken şablon düzenlenemez** (custom SMTP veya Pro plan gerekir). Bağlantı yapıştırma yöntemi hiçbir ayar gerektirmez ve varsayılan şablonla çalışır.
+>
+> Kod alanı da desteklenir: e-postada 6 haneli kod varsa (custom SMTP + `{{ .Token }}` şablonu kuruluysa) doğrudan o kod girilebilir.
+> Bağlantının geçerlilik süresi: Authentication → Providers → Email → *Email OTP Expiry* (varsayılan 3600 sn).
 
 
 ==========================================================================================
@@ -237,7 +277,7 @@ Oturum yerelde saklandığı için uygulama her açılışta tekrar giriş istem
 {
   "name": "ultimate",
   "private": true,
-  "version": "1.1.1",
+  "version": "1.3.0",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -591,6 +631,8 @@ export default function App() {
   const [session, setSession] = useState<Session | null>(null)
   const [authReady, setAuthReady] = useState(false)
   const [storageReady, setStorageReady] = useState(false)
+  // Şifre sıfırlama sırasında oturum açılsa bile ana ekrana geçmeyi engeller
+  const [recoveryBusy, setRecoveryBusy] = useState(false)
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data }) => {
@@ -654,7 +696,7 @@ export default function App() {
     }
   }, [session, authReady])
 
-  if (!authReady || (session && !storageReady)) {
+  if (!authReady || (session && !storageReady && !recoveryBusy)) {
     return (
       <div className="flex h-screen w-full items-center justify-center bg-background text-sm text-muted-foreground">
         Yükleniyor...
@@ -664,8 +706,10 @@ export default function App() {
 
   // Oturum yoksa: giriş ekranı. Görünümler ancak giriş yapıldıktan sonra mount edilir,
   // böylece yetkisiz sorgu ve realtime aboneliği oluşmaz.
-  if (!session) {
-    return <LoginView />
+  // Şifre sıfırlama tamamlanana kadar (recoveryBusy) oturum açılmış olsa bile
+  // giriş ekranında kalınır; yeni şifre kaydedilip mesaj gösterilir.
+  if (!session || recoveryBusy) {
+    return <LoginView onRecoveryBusyChange={setRecoveryBusy} />
   }
 
   return (
@@ -1952,18 +1996,38 @@ maksimum puan almak üzere anahtar kelime optimizasyonuyla hazırlanmıştır.\r
  [19/33] DOSYA: src/components/LoginView.tsx
 ==========================================================================================
 import { useState } from 'react'
-import { Command, Lock, Mail, Loader2, ShieldCheck } from 'lucide-react'
+import { Command, Lock, Mail, Loader2, ShieldCheck, KeyRound, ArrowLeft } from 'lucide-react'
 import { supabase } from '../lib/supabase'
 
-type Mode = 'login' | 'signup'
+// 'reset'        : e-posta girilir, sifirlama kodu istenir
+// 'resetConfirm' : gelen 6 haneli kod + yeni sifre girilir
+type Mode = 'login' | 'signup' | 'reset' | 'resetConfirm'
 
-export function LoginView() {
+interface LoginViewProps {
+  /**
+   * Sifre sifirlama sirasinda true olur. App bu bayrak acikken ana ekrana
+   * gecmez; boylece kod dogrulandiktan sonra sifre guncellenip mesaj
+   * gosterilebilir (oturum hemen acilsa bile ekran degismez).
+   */
+  onRecoveryBusyChange?: (busy: boolean) => void
+}
+
+export function LoginView({ onRecoveryBusyChange }: LoginViewProps) {
   const [mode, setMode] = useState<Mode>('login')
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
+  const [recoveryInput, setRecoveryInput] = useState('')
+  const [newPassword, setNewPassword] = useState('')
+  const [newPassword2, setNewPassword2] = useState('')
   const [isLoading, setIsLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [info, setInfo] = useState<string | null>(null)
+
+  const goTo = (next: Mode) => {
+    setMode(next)
+    setError(null)
+    setInfo(null)
+  }
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -2010,6 +2074,127 @@ export function LoginView() {
     }
   }
 
+  // 1. adım: sifirlama kodu iste
+  const requestResetCode = async () => {
+    setError(null)
+    setInfo(null)
+
+    const mail = email.trim()
+    if (!mail) {
+      setError('E-posta adresini gir.')
+      return
+    }
+
+    setIsLoading(true)
+    try {
+      const { error } = await supabase.auth.resetPasswordForEmail(mail)
+      if (error) throw error
+
+      setRecoveryInput('')
+      setNewPassword('')
+      setNewPassword2('')
+      setMode('resetConfirm')
+      setInfo('E-postana sıfırlama bağlantısı gönderdik. Bağlantıyı kopyalayıp aşağıya yapıştır (6 haneli kod da geçerlidir).')
+    } catch (err: any) {
+      const message: string = err?.message || 'Kod gönderilemedi.'
+      if (message.toLowerCase().includes('rate limit') || message.toLowerCase().includes('too many')) {
+        setError('Çok fazla kod istedin. Birkaç dakika bekleyip tekrar dene.')
+      } else {
+        setError(message)
+      }
+    } finally {
+      setIsLoading(false)
+    }
+  }
+
+  const handleResetRequest = (e: React.FormEvent) => {
+    e.preventDefault()
+    void requestResetCode()
+  }
+
+  // E-postadaki baglantidan token_hash'i (veya 6 haneli kodu) cikarir
+  const parseRecoveryInput = (raw: string): { token?: string; tokenHash?: string } | null => {
+    const text = raw.trim()
+    if (!text) return null
+
+    // 1) 6 haneli kod (bosluk/tire ile yazilmis olabilir)
+    const digitsOnly = text.replace(/[\s-]/g, '')
+    if (/^\d{6}$/.test(digitsOnly)) return { token: digitsOnly }
+
+    // 2) Baglantidan token_hash cikar: ...?token=... veya ?token_hash=...
+    const fromUrl = text.match(/[?&]token(?:_hash)?=([A-Za-z0-9._\-]+)/)
+    if (fromUrl) return { tokenHash: fromUrl[1] }
+
+    // 3) Dogrudan token_hash yapistirilmis olabilir
+    if (/^[A-Za-z0-9._\-]{20,}$/.test(text)) return { tokenHash: text }
+
+    return null
+  }
+
+  // 2. adım: kodu dogrula + yeni sifreyi kaydet
+  const handleResetConfirm = async (e: React.FormEvent) => {
+    e.preventDefault()
+    setError(null)
+    setInfo(null)
+
+    const mail = email.trim()
+    const parsed = parseRecoveryInput(recoveryInput)
+    if (!parsed) {
+      setError('E-postadaki sıfırlama bağlantısını yapıştır ya da 6 haneli kodu gir.')
+      return
+    }
+    if (parsed.token && !mail) {
+      setError('E-posta adresi eksik. Baştan başla.')
+      return
+    }
+    if (newPassword.length < 6) {
+      setError('Yeni şifre en az 6 karakter olmalı.')
+      return
+    }
+    if (newPassword !== newPassword2) {
+      setError('İki şifre birbiriyle uyuşmuyor.')
+      return
+    }
+
+    setIsLoading(true)
+    // Kod dogrulaninca oturum acilir; App'in ana ekrana gecmemesi icin kilit
+    onRecoveryBusyChange?.(true)
+    let completed = false
+    try {
+      const { error } = parsed.tokenHash
+        ? await supabase.auth.verifyOtp({ token_hash: parsed.tokenHash, type: 'recovery' })
+        : await supabase.auth.verifyOtp({ email: mail, token: parsed.token!, type: 'recovery' })
+      if (error) throw error
+
+      const { error: updateError } = await supabase.auth.updateUser({ password: newPassword })
+      if (updateError) throw updateError
+
+      completed = true
+      setInfo('Şifren güncellendi! Uygulama açılıyor...')
+      window.setTimeout(() => onRecoveryBusyChange?.(false), 1200)
+    } catch (err: any) {
+      // Yarim kalan oturum varsa kapat ki kullanici giris ekraninda kalsin
+      try {
+        await supabase.auth.signOut()
+      } catch {
+        /* yoksay */
+      }
+      onRecoveryBusyChange?.(false)
+
+      const message: string = err?.message || 'Doğrulanamadı.'
+      const lower = message.toLowerCase()
+      if (lower.includes('expired') || lower.includes('invalid') || lower.includes('token')) {
+        setError('Bağlantı geçersiz veya süresi dolmuş. "Yeni bağlantı gönder" ile tekrar isteyebilirsin.')
+      } else {
+        setError(message)
+      }
+    } finally {
+      if (!completed) setIsLoading(false)
+    }
+  }
+
+  const isResetMode = mode === 'reset' || mode === 'resetConfirm'
+
   return (
     <div className="flex h-screen w-full items-center justify-center bg-background p-6">
       <div className="w-full max-w-md">
@@ -2024,74 +2209,234 @@ export function LoginView() {
         </div>
 
         <div className="rounded-2xl border border-border bg-sidebar p-8 shadow-2xl">
-          <div className="mb-6 flex items-center gap-1 rounded-xl bg-background p-1 text-sm font-bold">
-            <button
-              type="button"
-              onClick={() => { setMode('login'); setError(null); setInfo(null) }}
-              className={`flex-1 rounded-lg py-2 transition-colors cursor-pointer ${mode === 'login' ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:text-foreground'}`}
-            >
-              Giriş Yap
-            </button>
-            <button
-              type="button"
-              onClick={() => { setMode('signup'); setError(null); setInfo(null) }}
-              className={`flex-1 rounded-lg py-2 transition-colors cursor-pointer ${mode === 'signup' ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:text-foreground'}`}
-            >
-              Hesap Oluştur
-            </button>
-          </div>
-
-          <form onSubmit={handleSubmit} className="flex flex-col gap-4">
-            <label className="flex flex-col gap-2">
-              <span className="text-xs font-bold uppercase tracking-wider text-muted-foreground">E-posta</span>
-              <div className="flex items-center gap-3 rounded-xl border border-border bg-background px-4 py-3 shadow-inner focus-within:border-primary focus-within:ring-1 focus-within:ring-primary/50">
-                <Mail className="h-4 w-4 text-muted-foreground" />
-                <input
-                  type="email"
-                  value={email}
-                  onChange={(e) => setEmail(e.target.value)}
-                  placeholder="ornek@mail.com"
-                  autoComplete="email"
-                  className="w-full bg-transparent text-sm outline-none"
-                />
+          {isResetMode ? (
+            <div className="mb-6 flex items-center gap-3">
+              <button
+                type="button"
+                onClick={() => goTo('login')}
+                className="flex h-8 w-8 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-accent hover:text-foreground cursor-pointer"
+                aria-label="Geri"
+                title="Girişe dön"
+              >
+                <ArrowLeft className="h-4 w-4" />
+              </button>
+              <div>
+                <p className="text-sm font-bold">Şifremi Unuttum</p>
+                <p className="text-[11px] text-muted-foreground">
+                  {mode === 'reset' ? 'E-postana sıfırlama bağlantısı gönderelim' : 'Bağlantıyı yapıştır ve yeni şifreni belirle'}
+                </p>
               </div>
-            </label>
+            </div>
+          ) : (
+            <div className="mb-6 flex items-center gap-1 rounded-xl bg-background p-1 text-sm font-bold">
+              <button
+                type="button"
+                onClick={() => goTo('login')}
+                className={`flex-1 rounded-lg py-2 transition-colors cursor-pointer ${mode === 'login' ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:text-foreground'}`}
+              >
+                Giriş Yap
+              </button>
+              <button
+                type="button"
+                onClick={() => goTo('signup')}
+                className={`flex-1 rounded-lg py-2 transition-colors cursor-pointer ${mode === 'signup' ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:text-foreground'}`}
+              >
+                Hesap Oluştur
+              </button>
+            </div>
+          )}
 
-            <label className="flex flex-col gap-2">
-              <span className="text-xs font-bold uppercase tracking-wider text-muted-foreground">Şifre</span>
-              <div className="flex items-center gap-3 rounded-xl border border-border bg-background px-4 py-3 shadow-inner focus-within:border-primary focus-within:ring-1 focus-within:ring-primary/50">
-                <Lock className="h-4 w-4 text-muted-foreground" />
-                <input
-                  type="password"
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                  placeholder="••••••••"
-                  autoComplete={mode === 'login' ? 'current-password' : 'new-password'}
-                  className="w-full bg-transparent text-sm outline-none"
-                />
-              </div>
-            </label>
+          {/* --- Giriş / Kayıt --- */}
+          {!isResetMode && (
+            <form onSubmit={handleSubmit} className="flex flex-col gap-4">
+              <label className="flex flex-col gap-2">
+                <span className="text-xs font-bold uppercase tracking-wider text-muted-foreground">E-posta</span>
+                <div className="flex items-center gap-3 rounded-xl border border-border bg-background px-4 py-3 shadow-inner focus-within:border-primary focus-within:ring-1 focus-within:ring-primary/50">
+                  <Mail className="h-4 w-4 text-muted-foreground" />
+                  <input
+                    type="email"
+                    value={email}
+                    onChange={(e) => setEmail(e.target.value)}
+                    placeholder="ornek@mail.com"
+                    autoComplete="email"
+                    className="w-full bg-transparent text-sm outline-none"
+                  />
+                </div>
+              </label>
 
-            {error && (
-              <p className="rounded-xl border border-red-500/30 bg-red-500/10 px-4 py-3 text-xs font-medium text-red-400">
-                {error}
+              <label className="flex flex-col gap-2">
+                <span className="text-xs font-bold uppercase tracking-wider text-muted-foreground">Şifre</span>
+                <div className="flex items-center gap-3 rounded-xl border border-border bg-background px-4 py-3 shadow-inner focus-within:border-primary focus-within:ring-1 focus-within:ring-primary/50">
+                  <Lock className="h-4 w-4 text-muted-foreground" />
+                  <input
+                    type="password"
+                    value={password}
+                    onChange={(e) => setPassword(e.target.value)}
+                    placeholder="••••••••"
+                    autoComplete={mode === 'login' ? 'current-password' : 'new-password'}
+                    className="w-full bg-transparent text-sm outline-none"
+                  />
+                </div>
+              </label>
+
+              {mode === 'login' && (
+                <button
+                  type="button"
+                  onClick={() => goTo('reset')}
+                  className="self-end text-[11px] font-medium text-muted-foreground transition-colors hover:text-primary cursor-pointer"
+                >
+                  Şifremi unuttum
+                </button>
+              )}
+
+              {error && (
+                <p className="rounded-xl border border-red-500/30 bg-red-500/10 px-4 py-3 text-xs font-medium text-red-400">
+                  {error}
+                </p>
+              )}
+              {info && (
+                <p className="rounded-xl border border-green-500/30 bg-green-500/10 px-4 py-3 text-xs font-medium text-green-400">
+                  {info}
+                </p>
+              )}
+
+              <button
+                type="submit"
+                disabled={isLoading}
+                className="mt-2 flex items-center justify-center gap-2 rounded-xl bg-primary px-6 py-3 font-bold text-primary-foreground shadow-md transition-colors hover:bg-primary/90 disabled:opacity-60 cursor-pointer"
+              >
+                {isLoading ? <Loader2 className="h-5 w-5 animate-spin" /> : <ShieldCheck className="h-5 w-5" />}
+                {mode === 'login' ? 'Giriş Yap' : 'Hesap Oluştur'}
+              </button>
+            </form>
+          )}
+
+          {/* --- Şifre sıfırlama: e-posta --- */}
+          {mode === 'reset' && (
+            <form onSubmit={handleResetRequest} className="flex flex-col gap-4">
+              <label className="flex flex-col gap-2">
+                <span className="text-xs font-bold uppercase tracking-wider text-muted-foreground">Hesabının e-postası</span>
+                <div className="flex items-center gap-3 rounded-xl border border-border bg-background px-4 py-3 shadow-inner focus-within:border-primary focus-within:ring-1 focus-within:ring-primary/50">
+                  <Mail className="h-4 w-4 text-muted-foreground" />
+                  <input
+                    type="email"
+                    value={email}
+                    onChange={(e) => setEmail(e.target.value)}
+                    placeholder="ornek@mail.com"
+                    autoComplete="email"
+                    autoFocus
+                    className="w-full bg-transparent text-sm outline-none"
+                  />
+                </div>
+              </label>
+
+              {error && (
+                <p className="rounded-xl border border-red-500/30 bg-red-500/10 px-4 py-3 text-xs font-medium text-red-400">
+                  {error}
+                </p>
+              )}
+
+              <button
+                type="submit"
+                disabled={isLoading}
+                className="mt-2 flex items-center justify-center gap-2 rounded-xl bg-primary px-6 py-3 font-bold text-primary-foreground shadow-md transition-colors hover:bg-primary/90 disabled:opacity-60 cursor-pointer"
+              >
+                {isLoading ? <Loader2 className="h-5 w-5 animate-spin" /> : <Mail className="h-5 w-5" />}
+                Sıfırlama Bağlantısı Gönder
+              </button>
+
+              <p className="text-center text-[11px] text-muted-foreground">
+                E-postana gelen bağlantıyı uygulamaya yapıştıracaksın.
               </p>
-            )}
-            {info && (
-              <p className="rounded-xl border border-green-500/30 bg-green-500/10 px-4 py-3 text-xs font-medium text-green-400">
-                {info}
-              </p>
-            )}
+            </form>
+          )}
 
-            <button
-              type="submit"
-              disabled={isLoading}
-              className="mt-2 flex items-center justify-center gap-2 rounded-xl bg-primary px-6 py-3 font-bold text-primary-foreground shadow-md transition-colors hover:bg-primary/90 disabled:opacity-60 cursor-pointer"
-            >
-              {isLoading ? <Loader2 className="h-5 w-5 animate-spin" /> : <ShieldCheck className="h-5 w-5" />}
-              {mode === 'login' ? 'Giriş Yap' : 'Hesap Oluştur'}
-            </button>
-          </form>
+          {/* --- Şifre sıfırlama: bağlantı/kod + yeni şifre --- */}
+          {mode === 'resetConfirm' && (
+            <form onSubmit={handleResetConfirm} className="flex flex-col gap-4">
+              <p className="rounded-xl border border-border bg-background px-4 py-3 text-xs text-muted-foreground">
+                Bağlantı gönderilen adres: <span className="font-semibold text-foreground">{email.trim()}</span>
+              </p>
+
+              <label className="flex flex-col gap-2">
+                <span className="text-xs font-bold uppercase tracking-wider text-muted-foreground">Sıfırlama Bağlantısı</span>
+                <div className="flex items-start gap-3 rounded-xl border border-border bg-background px-4 py-3 shadow-inner focus-within:border-primary focus-within:ring-1 focus-within:ring-primary/50">
+                  <KeyRound className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground" />
+                  <textarea
+                    rows={3}
+                    value={recoveryInput}
+                    onChange={(e) => setRecoveryInput(e.target.value)}
+                    placeholder="E-postadaki bağlantıyı buraya yapıştır (veya 6 haneli kodu yaz)"
+                    autoFocus
+                    className="w-full resize-none bg-transparent text-xs leading-relaxed outline-none break-all"
+                  />
+                </div>
+                <span className="text-[11px] leading-relaxed text-muted-foreground">
+                  E-postada <b>"Reset password"</b> yazısına sağ tık → <b>Bağlantıyı kopyala</b> → buraya yapıştır.
+                  Bağlantıya tıklamana gerek yok (o adres tarayıcıya gider).
+                </span>
+              </label>
+
+              <label className="flex flex-col gap-2">
+                <span className="text-xs font-bold uppercase tracking-wider text-muted-foreground">Yeni Şifre</span>
+                <div className="flex items-center gap-3 rounded-xl border border-border bg-background px-4 py-3 shadow-inner focus-within:border-primary focus-within:ring-1 focus-within:ring-primary/50">
+                  <Lock className="h-4 w-4 text-muted-foreground" />
+                  <input
+                    type="password"
+                    value={newPassword}
+                    onChange={(e) => setNewPassword(e.target.value)}
+                    placeholder="en az 6 karakter"
+                    autoComplete="new-password"
+                    className="w-full bg-transparent text-sm outline-none"
+                  />
+                </div>
+              </label>
+
+              <label className="flex flex-col gap-2">
+                <span className="text-xs font-bold uppercase tracking-wider text-muted-foreground">Yeni Şifre (tekrar)</span>
+                <div className="flex items-center gap-3 rounded-xl border border-border bg-background px-4 py-3 shadow-inner focus-within:border-primary focus-within:ring-1 focus-within:ring-primary/50">
+                  <Lock className="h-4 w-4 text-muted-foreground" />
+                  <input
+                    type="password"
+                    value={newPassword2}
+                    onChange={(e) => setNewPassword2(e.target.value)}
+                    placeholder="••••••••"
+                    autoComplete="new-password"
+                    className="w-full bg-transparent text-sm outline-none"
+                  />
+                </div>
+              </label>
+
+              {error && (
+                <p className="rounded-xl border border-red-500/30 bg-red-500/10 px-4 py-3 text-xs font-medium text-red-400">
+                  {error}
+                </p>
+              )}
+              {info && (
+                <p className="rounded-xl border border-green-500/30 bg-green-500/10 px-4 py-3 text-xs font-medium text-green-400">
+                  {info}
+                </p>
+              )}
+
+              <button
+                type="submit"
+                disabled={isLoading}
+                className="mt-2 flex items-center justify-center gap-2 rounded-xl bg-primary px-6 py-3 font-bold text-primary-foreground shadow-md transition-colors hover:bg-primary/90 disabled:opacity-60 cursor-pointer"
+              >
+                {isLoading ? <Loader2 className="h-5 w-5 animate-spin" /> : <ShieldCheck className="h-5 w-5" />}
+                Şifreyi Güncelle
+              </button>
+
+              <button
+                type="button"
+                onClick={handleResetRequest}
+                disabled={isLoading}
+                className="text-center text-[11px] font-medium text-muted-foreground transition-colors hover:text-primary disabled:opacity-60 cursor-pointer"
+              >
+                E-posta gelmedi mi? Tekrar gönder
+              </button>
+            </form>
+          )}
         </div>
 
         <p className="mt-6 text-center text-[11px] text-muted-foreground">
@@ -2106,14 +2451,13 @@ export function LoginView() {
 ==========================================================================================
  [20/33] DOSYA: src/components/NotesView.tsx
 ==========================================================================================
-import { useState, useEffect } from 'react'
-import { Plus, Search, Pin, Trash2, Tag, FileText, MonitorSmartphone, Download, Upload, Save, Check, Bold, Italic, Heading, ImageIcon } from 'lucide-react'
+import { useState, useEffect, useRef } from 'react'
+import { Plus, Search, Pin, Trash2, Tag, FileText, MonitorSmartphone, Download, Upload, Save, Check, Bold, Italic, Heading, ImageIcon, Loader2, CloudUpload } from 'lucide-react'
 import { invoke } from '@tauri-apps/api/core'
-import { convertFileSrc } from '@tauri-apps/api/core'
 import { open, save } from '@tauri-apps/plugin-dialog'
 import { cn } from '../lib/utils'
 import { supabase } from '../lib/supabase'
-import { uGet, uSet } from '../lib/userStorage'
+import { uGet, uSet, getActiveUserId } from '../lib/userStorage'
 
 // TipTap Editör Kütüphaneleri
 import { useEditor, EditorContent } from '@tiptap/react'
@@ -2130,12 +2474,19 @@ type Note = {
   pinned: boolean
 }
 
+/** Not resimlerinin yüklendiği Supabase Storage bucket'ı (supabase/schema.sql, 9. bölüm) */
+const NOTE_IMAGES_BUCKET = 'note-images'
+/** Tek resim için üst sınır (MB) - Storage kotasını korur */
+const MAX_IMAGE_MB = 10
+
 export function NotesView() {
   const [notes, setNotes] = useState<Note[]>([])
   const [activeId, setActiveId] = useState<string | null>(null)
   const [searchQuery, setSearchQuery] = useState('')
   const [isSaving, setIsSaving] = useState(false)
   const [rainmeterPath, setRainmeterPath] = useState<string | null>(null)
+  const [isUploadingImage, setIsUploadingImage] = useState(false)
+  const [uploadError, setUploadError] = useState<string | null>(null)
 
   const fetchNotes = async () => {
     try {
@@ -2206,10 +2557,76 @@ export function NotesView() {
 
   const activeNote = notes.find(n => n.id === activeId)
 
+  // ------------------------------------------------------------------
+  // NOT RESİMLERİ: Supabase Storage'a yükleme
+  // Resimler artık base64 olarak not içeriğine gömülmez; Storage'a yüklenir
+  // ve nota yalnızca genel URL yazılır (DB şişmez, diğer cihazlarda da görünür).
+  // ------------------------------------------------------------------
+  const uploadImageRef = useRef<(file: File, pos?: number) => Promise<void>>(async () => {})
+
+  const uploadNoteImage = async (file: File): Promise<string> => {
+    const userId = getActiveUserId() ?? (await supabase.auth.getUser()).data.user?.id
+    if (!userId) throw new Error('Oturum bulunamadı, tekrar giriş yap.')
+
+    const ext = (file.name.split('.').pop() || 'png').toLowerCase().replace(/[^a-z0-9]/g, '') || 'png'
+    const path = `${userId}/${Date.now()}_${Math.random().toString(36).slice(2, 10)}.${ext}`
+
+    const { error } = await supabase.storage
+      .from(NOTE_IMAGES_BUCKET)
+      .upload(path, file, {
+        cacheControl: '31536000',
+        contentType: file.type || 'image/png',
+        upsert: false,
+      })
+    if (error) throw error
+
+    const { data } = supabase.storage.from(NOTE_IMAGES_BUCKET).getPublicUrl(path)
+    if (!data?.publicUrl) throw new Error('Genel bağlantı alınamadı.')
+    return data.publicUrl
+  }
+
+  // Resmi yükleyip imlecin olduğu yere (veya mevcut konuma) ekler
+  const uploadAndInsertImage = async (file: File, pos?: number) => {
+    if (!editor) return
+    if (!file.type.startsWith('image/')) return
+    if (file.size > MAX_IMAGE_MB * 1024 * 1024) {
+      setUploadError(`Resim çok büyük (en fazla ${MAX_IMAGE_MB} MB).`)
+      return
+    }
+
+    setUploadError(null)
+    setIsUploadingImage(true)
+    try {
+      const url = await uploadNoteImage(file)
+      if (typeof pos === 'number') {
+        editor.chain().focus().insertContentAt(pos, { type: 'image', attrs: { src: url } }).run()
+      } else {
+        editor.chain().focus().setImage({ src: url }).run()
+      }
+    } catch (err: any) {
+      console.error('Resim yükleme hatası:', err)
+      const msg: string = err?.message || 'bilinmeyen hata'
+      setUploadError(
+        msg.toLowerCase().includes('bucket')
+          ? 'Storage bucket bulunamadı. supabase/schema.sql 9. bölümü çalıştır.'
+          : 'Resim yüklenemedi: ' + msg,
+      )
+    } finally {
+      setIsUploadingImage(false)
+    }
+  }
+
+  // Editör olayları (paste/drop) için her zaman güncel fonksiyona erişim
+  useEffect(() => {
+    uploadImageRef.current = (file: File, pos?: number) => uploadAndInsertImage(file, pos)
+  })
+
   // TIPTAP EDİTÖR KURULUMU
   const editor = useEditor({
     extensions: [
       StarterKit,
+      // allowBase64: true -> ESKİ notlardaki gömülü (base64) resimler görünmeye
+      // devam etsin diye. Yeni eklenen resimler her zaman Storage'a yüklenir.
       Image.configure({ inline: true, allowBase64: true }),
       Placeholder.configure({ placeholder: 'Aklındakileri buraya dök, resimleri doğrudan ekle...' })
     ],
@@ -2217,6 +2634,36 @@ export function NotesView() {
     onUpdate: ({ editor }) => {
       // Her harf yazıldığında state'i sessizce günceller
       updateActiveNote('content', editor.getHTML())
+    },
+    editorProps: {
+      // Panodan görsel yapıştırma (ekran görüntüsü dahil)
+      handlePaste: (view, event) => {
+        const items = event.clipboardData?.items
+        if (!items) return false
+        for (const item of items) {
+          if (item.type.startsWith('image/')) {
+            const file = item.getAsFile()
+            if (file) {
+              event.preventDefault()
+              void uploadImageRef.current(file, view.state.selection.from)
+              return true
+            }
+          }
+        }
+        return false
+      },
+      // Sürükle-bırak ile görsel ekleme
+      handleDrop: (view, event, _slice, moved) => {
+        if (moved) return false // editör içinde taşınan içerik
+        const files = event.dataTransfer?.files
+        if (!files || files.length === 0) return false
+        const imageFile = Array.from(files).find(f => f.type.startsWith('image/'))
+        if (!imageFile) return false
+        event.preventDefault()
+        const pos = view.posAtCoords({ left: event.clientX, top: event.clientY })?.pos
+        void uploadImageRef.current(imageFile, pos)
+        return true
+      },
     },
   })
 
@@ -2280,7 +2727,7 @@ export function NotesView() {
     setTimeout(() => setIsSaving(false), 1000)
   }
 
-  // BİLGİSAYARDAN KUSURSUZ RESİM EKLEME
+  // BİLGİSAYARDAN RESİM EKLEME (Storage'a yükler, nota yalnızca URL yazar)
   const handleInsertImage = async () => {
     if (!editor) return
     try {
@@ -2288,11 +2735,21 @@ export function NotesView() {
         multiple: false,
         filters: [{ name: 'Resimler', extensions: ['png', 'jpg', 'jpeg', 'gif', 'webp'] }]
       })
-      if (selected && typeof selected === 'string') {
-        const safeUrl = convertFileSrc(selected)
-        editor.chain().focus().setImage({ src: safeUrl }).run()
-      }
-    } catch (e) { console.error(e) }
+      if (!selected || typeof selected !== 'string') return
+
+      const fileName = selected.split(/[\\/]/).pop() || 'resim.png'
+      const ext = (fileName.split('.').pop() || 'png').toLowerCase()
+      const mime = ext === 'jpg' || ext === 'jpeg' ? 'image/jpeg' : `image/${ext}`
+
+      // Yerel dosyayı byte olarak oku (read_audio_file genel amaçlı dosya okuyucudur)
+      const bytes = await invoke<number[]>('read_audio_file', { path: selected })
+      const file = new File([new Uint8Array(bytes)], fileName, { type: mime })
+
+      await uploadAndInsertImage(file)
+    } catch (e: any) {
+      console.error(e)
+      setUploadError('Resim eklenemedi: ' + (e?.message || e))
+    }
   }
 
   const handleImportNote = async () => {
@@ -2508,10 +2965,26 @@ export function NotesView() {
                   
                   <div className="w-px h-5 bg-border mx-2"></div>
                   
-                  <button onClick={handleInsertImage} className="p-2 hover:bg-accent rounded-lg text-muted-foreground hover:text-foreground transition-colors cursor-pointer" title="Bilgisayardan Resim Ekle">
-                    <ImageIcon className="h-4 w-4" />
+                  <button 
+                    onClick={handleInsertImage} 
+                    disabled={isUploadingImage}
+                    className="p-2 hover:bg-accent rounded-lg text-muted-foreground hover:text-foreground transition-colors cursor-pointer disabled:opacity-50" 
+                    title="Bilgisayardan Resim Ekle (sürükle-bırak ve Ctrl+V de çalışır)"
+                  >
+                    {isUploadingImage ? <Loader2 className="h-4 w-4 animate-spin" /> : <ImageIcon className="h-4 w-4" />}
                   </button>
+                  {isUploadingImage && (
+                    <span className="flex items-center gap-1.5 pl-1 pr-2 text-[11px] font-medium text-muted-foreground">
+                      <CloudUpload className="h-3.5 w-3.5" /> Resim yükleniyor...
+                    </span>
+                  )}
                 </div>
+              )}
+
+              {uploadError && (
+                <p className="mb-3 rounded-xl border border-red-500/30 bg-red-500/10 px-4 py-2 text-xs font-medium text-red-400">
+                  {uploadError}
+                </p>
               )}
 
               {/* TIPTAP EDİTÖR EKRANI */}
@@ -3862,7 +4335,7 @@ export function SetupWizard() {
 ==========================================================================================
 [package]
 name = "ultimate"
-version = "1.1.1"
+version = "1.3.0"
 description = "A Tauri App"
 authors = ["you"]
 edition = "2021"
@@ -3902,7 +4375,7 @@ fn main() {
 {
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "Ultimate Asistan",
-  "version": "1.1.1",
+  "version": "1.3.0",
   "identifier": "com.bilalhabessimsek.ultimate",
   "build": {
     "beforeDevCommand": "npm run dev",
@@ -4540,6 +5013,51 @@ begin
 exception when duplicate_object then
   null;
 end $$;
+
+-- ============================================================
+-- 9) NOT RESİMLERİ (Supabase Storage)
+--    Notlara eklenen resimler artık base64 olarak veritabanına
+--    gömülmez; bu bucket'a yüklenir ve nota yalnızca genel URL
+--    yazılır. Böylece DB şişmez ve resimler diğer cihazlarda da görünür.
+--
+--    Bucket: note-images (public = true)
+--    Yazma/silme: yalnızca kendi klasörü -> <user_id>/dosya.png
+--    Okuma: public bucket olduğu için bağlantıyı bilen görüntüleyebilir
+--    (kişisel kullanım için pratik; gizlilik istersen bucket'ı private
+--     yapıp imzalı URL üretimine geçebiliriz).
+-- ============================================================
+
+insert into storage.buckets (id, name, public)
+values ('note-images', 'note-images', true)
+on conflict (id) do update set public = true;
+
+drop policy if exists note_images_insert_own on storage.objects;
+create policy note_images_insert_own on storage.objects
+  for insert to authenticated
+  with check (
+    bucket_id = 'note-images'
+    and (storage.foldername(name))[1] = auth.uid()::text
+  );
+
+drop policy if exists note_images_update_own on storage.objects;
+create policy note_images_update_own on storage.objects
+  for update to authenticated
+  using (
+    bucket_id = 'note-images'
+    and (storage.foldername(name))[1] = auth.uid()::text
+  )
+  with check (
+    bucket_id = 'note-images'
+    and (storage.foldername(name))[1] = auth.uid()::text
+  );
+
+drop policy if exists note_images_delete_own on storage.objects;
+create policy note_images_delete_own on storage.objects
+  for delete to authenticated
+  using (
+    bucket_id = 'note-images'
+    and (storage.foldername(name))[1] = auth.uid()::text
+  );
 
 
 ==========================================================================================
