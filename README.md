@@ -126,38 +126,22 @@ Notların bulutta senkronize olması için tek seferlik kurulum gerekir:
    ```
    > ⚠️ **Project URL'deki ref'i birebir kopyalayın.** Tek bir harf hatası (ör. `g` ↔ `q`) DNS kaydını tamamen kırar ve hata "DNS adı yok" olarak görünür.
 
-4. **SQL** bölümünde şu politikaları çalıştırın (aksi halde okuma çalışır ama **yazma `42501` hatası** verir):
-   ```sql
-   do $$
-   begin
-     if not exists (select 1 from pg_policies where schemaname='public' and tablename='notes' and policyname='notes_select') then
-       create policy "notes_select" on public.notes for select using (true);
-     end if;
-     if not exists (select 1 from pg_policies where schemaname='public' and tablename='notes' and policyname='notes_insert') then
-       create policy "notes_insert" on public.notes for insert with check (true);
-     end if;
-     if not exists (select 1 from pg_policies where schemaname='public' and tablename='notes' and policyname='notes_update') then
-       create policy "notes_update" on public.notes for update using (true) with check (true);
-     end if;
-     if not exists (select 1 from pg_policies where schemaname='public' and tablename='notes' and policyname='notes_delete') then
-       create policy "notes_delete" on public.notes for delete using (true);
-     end if;
-   end $$;
+4. **Tablolar + politikalar + realtime:** `supabase/schema.sql` dosyasının **tamamını** SQL editöründe çalıştırın. Script;
+   - `notes`, `calendar_events`, `playlists`, `music_state` tablolarını,
+   - **hesaba bağlı** RLS politikalarını (`auth.uid() = user_id`),
+   - realtime yayın üyeliğini
+   
+   tek seferde kurar. Ayrıca 7. bölümü sahipsiz eski satırları ilk kullanıcıya bağlar ve bileşik anahtarları (`user_id + name/key`) oluşturur.
 
-   do $$
-   begin
-     alter publication supabase_realtime add table public.notes;
-   exception when duplicate_object then
-     null;
-   end $$;
-   ```
+   > ⚠️ Önce **Authentication → Users** ekranından bir kullanıcı oluşturun. Kullanıcı yoksa script uyarı verip durur (bilinçli koruma).
+   > ⚠️ Elle **`using (true)` politikası eklemeyin.** Postgres politikaları varsayılan olarak **VEYA** ile birleşir; tek bir gevşek politika tüm RLS korumasını geçersiz kılar.
 
 **Hızlı doğrulama (terminal):**
 ```bash
 curl -s -H "apikey: $VITE_SUPABASE_ANON_KEY" \
   "https://<proje-ref>.supabase.co/rest/v1/notes?select=id&limit=1"
 ```
-`[]` veya JSON listesi döndüyse bağlantı çalışıyor demektir (giriş yapılmadığı için boş liste normaldir).
+Oturum açılmadığı için `[]` dönmesi **beklenen** davranıştır (RLS veriyi kapatıyor). Yazma denemesi `42501` ile reddedilmeli.
 
 ---
 
