@@ -61,8 +61,10 @@ Sistem kaynaklarını minimum düzeyde tüketirken; akıllı müzik çalar, proj
 
 ### ☁️ 5. Bulut Senkronu (Supabase)
 * **Anlık Yedekleme:** Notlar `Ctrl+S` ile hem yerel dosyaya hem **Supabase** `notes` tablosuna yazılır.
-* **Realtime:** Aynı hesaptan açılan diğer pencereler/cihazlar, veritabanı olaylarını (**INSERT/UPDATE/DELETE**) kanal üzerinden dinleyerek listeyi anında günceller.
-* **Offline-first:** Bağlantı yoksa uygulama `localStorage`'a düşer; sorun yaşamadan kullanmaya devam eder.
+* **Takvim Senkronu:** Takvim etkinlikleri `calendar_events` tablosunda tutulur; uygulama ilk açılışta yereldeki (`localStorage`) eski etkinlikleri otomatik olarak buluta taşır.
+* **Realtime:** Aynı hesaptan açılan diğer pencereler/cihazlar, veritabanı olaylarını (**INSERT/UPDATE/DELETE**) kanal üzerinden dinleyerek listeleri anında günceller.
+* **Offline-first:** Bağlantı yoksa uygulama `localStorage`'a düşer; takvim başlığında küçük bir "yerel" rozeti görünür ve kullanım kesintisiz devam eder.
+* **Şema:** Tüm tablolar, RLS politikaları ve realtime ayarları `supabase/schema.sql` dosyasındadır.
 
 ---
 

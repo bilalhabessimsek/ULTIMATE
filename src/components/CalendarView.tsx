@@ -1,27 +1,127 @@
-import { useState, useEffect } from 'react'
-import { CalendarDays, ChevronLeft, ChevronRight, Plus, Trash2, MonitorSmartphone } from 'lucide-react'
+import { useState, useEffect, useMemo } from 'react'
+import { CalendarDays, ChevronLeft, ChevronRight, Plus, Trash2, MonitorSmartphone, CloudOff } from 'lucide-react'
 import { cn } from '../lib/utils'
 import { invoke } from '@tauri-apps/api/core'
 import { open } from '@tauri-apps/plugin-dialog'
+import { supabase } from '../lib/supabase'
+
+// Etkinlik modeli. Buluttan gelen kayıtların id'si > 0,
+// çevrimdışı eklenen (henüz buluta gitmemiş) kayıtların id'si < 0 olur.
+interface EventItem {
+  id: number
+  date: string
+  title: string
+}
+
+interface RemoteEventRow {
+  id: number
+  event_date: string
+  title: string
+}
+
+const toItems = (rows: RemoteEventRow[]): EventItem[] =>
+  rows.map((row) => ({ id: row.id, date: row.event_date, title: row.title }))
 
 export function CalendarView() {
   const [currentDate, setCurrentDate] = useState(new Date())
   const [selectedDate, setSelectedDate] = useState(new Date())
-  const [events, setEvents] = useState<Record<string, string[]>>({})
+  const [events, setEvents] = useState<EventItem[]>([])
   const [newEventText, setNewEventText] = useState('')
   const [rainmeterPath, setRainmeterPath] = useState<string | null>(localStorage.getItem('rainmeter_event_path'))
+  const [cloudError, setCloudError] = useState(false)
 
-  // Kayıtlı etkinlikleri yükle
+  // Yerel önbellekten okuma (uygulama anında dolu açılsın diye)
+  const readLocalCache = (): EventItem[] => {
+    try {
+      const saved = localStorage.getItem('ultimate_events')
+      if (!saved) return []
+      const parsed = JSON.parse(saved) as Record<string, string[]>
+      let tempId = -1
+      return Object.entries(parsed).flatMap(([date, titles]) =>
+        (titles || []).map((title) => ({ id: tempId--, date, title }))
+      )
+    } catch {
+      return []
+    }
+  }
+
+  const fetchRemote = async (): Promise<EventItem[]> => {
+    const { data, error } = await supabase
+      .from('calendar_events')
+      .select('id, event_date, title')
+      .order('id', { ascending: true })
+
+    if (error) throw error
+    return toItems((data || []) as RemoteEventRow[])
+  }
+
+  // İLK YÜKLEME + REALTIME
   useEffect(() => {
-    const saved = localStorage.getItem('ultimate_events')
-    if (saved) setEvents(JSON.parse(saved))
+    let cancelled = false
+
+    const syncNow = async () => {
+      try {
+        const remote = await fetchRemote()
+        if (cancelled) return
+        setCloudError(false)
+
+        if (remote.length > 0) {
+          setEvents(remote)
+          return
+        }
+
+        // Bulut boş ama yerelde veri varsa: ilk kurulumda mevcut
+        // etkinlikleri buluta taşı (tek seferlik göç).
+        const local = readLocalCache()
+        if (local.length === 0) return
+
+        const { data, error } = await supabase
+          .from('calendar_events')
+          .insert(local.map((e) => ({ event_date: e.date, title: e.title })))
+          .select('id, event_date, title')
+
+        if (error) throw error
+        if (!cancelled && data) setEvents(toItems(data as RemoteEventRow[]))
+      } catch (err) {
+        console.error('Supabase takvim hatası:', err)
+        if (!cancelled) setCloudError(true)
+      }
+    }
+
+    setEvents(readLocalCache())
+    syncNow()
+
+    const channel = supabase
+      .channel('calendar-realtime')
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'calendar_events' },
+        () => { syncNow() }
+      )
+      .subscribe()
+
+    return () => {
+      cancelled = true
+      supabase.removeChannel(channel)
+    }
   }, [])
 
-  // Etkinlikleri kaydet ve Rainmeter'ı güncelle
+  // Yerel önbelleği güncelle + Rainmeter'a yaz
+  const eventsByDate = useMemo(() => {
+    const grouped: Record<string, EventItem[]> = {}
+    for (const ev of events) {
+      if (!grouped[ev.date]) grouped[ev.date] = []
+      grouped[ev.date].push(ev)
+    }
+    return grouped
+  }, [events])
+
   useEffect(() => {
-    localStorage.setItem('ultimate_events', JSON.stringify(events))
-    syncWithRainmeter()
-  }, [events, selectedDate])
+    localStorage.setItem('ultimate_events', JSON.stringify(
+      Object.fromEntries(Object.entries(eventsByDate).map(([date, list]) => [date, list.map((e) => e.title)]))
+    ))
+    syncWithRainmeter(eventsByDate)
+  }, [eventsByDate])
 
   const daysInMonth = new Date(currentDate.getFullYear(), currentDate.getMonth() + 1, 0).getDate()
   const firstDayOfMonth = new Date(currentDate.getFullYear(), currentDate.getMonth(), 1).getDay()
@@ -38,32 +138,51 @@ export function CalendarView() {
   const handlePrevMonth = () => setCurrentDate(new Date(currentDate.getFullYear(), currentDate.getMonth() - 1, 1))
   const handleNextMonth = () => setCurrentDate(new Date(currentDate.getFullYear(), currentDate.getMonth() + 1, 1))
 
-  const handleAddEvent = (e: React.FormEvent) => {
+  const handleAddEvent = async (e: React.FormEvent) => {
     e.preventDefault()
-    if (!newEventText.trim()) return
-    const key = formatDateKey(selectedDate)
-    const dayEvents = events[key] || []
-    setEvents({ ...events, [key]: [...dayEvents, newEventText.trim()] })
+    const title = newEventText.trim()
+    if (!title) return
+
+    const dateKey = formatDateKey(selectedDate)
     setNewEventText('')
+
+    try {
+      const { data, error } = await supabase
+        .from('calendar_events')
+        .insert({ event_date: dateKey, title })
+        .select('id, event_date, title')
+        .single()
+
+      if (error) throw error
+      setEvents((prev) => [...prev, ...toItems([data as RemoteEventRow])])
+      setCloudError(false)
+    } catch (err) {
+      console.error('Supabase etkinlik ekleme hatası:', err)
+      setCloudError(true)
+      // Çevrimdışı: geçici negatif id ile yerelde tut
+      setEvents((prev) => [...prev, { id: -Date.now(), date: dateKey, title }])
+    }
   }
 
-  const handleDeleteEvent = (index: number) => {
-    const key = formatDateKey(selectedDate)
-    const dayEvents = events[key] || []
-    const newDayEvents = dayEvents.filter((_, i) => i !== index)
-    setEvents({ ...events, [key]: newDayEvents })
+  const handleDeleteEvent = async (id: number) => {
+    setEvents((prev) => prev.filter((ev) => ev.id !== id))
+
+    if (id < 0) return // henüz buluta gitmemiş kayıt
+
+    const { error } = await supabase.from('calendar_events').delete().eq('id', id)
+    if (error) console.error('Supabase etkinlik silme hatası:', error)
   }
 
   // RAINMETER BAĞLANTISI (Tüm Etkinlikleri Formata Uygun Şekilde Yazar)
-  const syncWithRainmeter = async () => {
+  const syncWithRainmeter = async (grouped: Record<string, EventItem[]>) => {
     if (!rainmeterPath) return
-    
+
     let content = ""
     // Tüm günleri dönüp dosyaya alt alta basıyoruz
-    for (const [dateKey, dayEvents] of Object.entries(events)) {
+    for (const [dateKey, dayEvents] of Object.entries(grouped)) {
       if (dayEvents.length > 0) {
          content += `[${dateKey}]\n`
-         content += dayEvents.map(e => "▪ " + e).join('\n') + "\n\n"
+         content += dayEvents.map(e => "▪ " + e.title).join('\n') + "\n\n"
       }
     }
 
@@ -86,13 +205,13 @@ export function CalendarView() {
         setRainmeterPath(path)
         localStorage.setItem('rainmeter_event_path', path)
         alert('Takvim başarıyla Rainmeter widget\'ına bağlandı!')
-        syncWithRainmeter()
+        syncWithRainmeter(eventsByDate)
       }
     } catch(e) { console.error(e) }
   }
 
   const selectedKey = formatDateKey(selectedDate)
-  const currentEvents = events[selectedKey] || []
+  const currentEvents = eventsByDate[selectedKey] || []
 
   return (
     <div className="flex h-full w-full flex-col md:flex-row relative">
@@ -102,6 +221,11 @@ export function CalendarView() {
         <div className="flex items-center justify-between mb-8">
           <h1 className="flex items-center gap-2 text-2xl font-bold tracking-tight text-foreground">
             <CalendarDays className="h-7 w-7 text-primary" /> Takvim
+            {cloudError && (
+              <span title="Bulut bağlantısı yok, etkinlikler yerel kaydediliyor" className="flex items-center gap-1 text-xs font-medium text-amber-500">
+                <CloudOff className="h-4 w-4" /> yerel
+              </span>
+            )}
           </h1>
           <button
             onClick={setupRainmeter}
@@ -134,7 +258,7 @@ export function CalendarView() {
               const dayNum = i + 1
               const cellDate = new Date(currentDate.getFullYear(), currentDate.getMonth(), dayNum)
               const cellKey = formatDateKey(cellDate)
-              const hasEvents = events[cellKey] && events[cellKey].length > 0
+              const hasEvents = eventsByDate[cellKey] && eventsByDate[cellKey].length > 0
               const isSelected = selectedDate.getDate() === dayNum && selectedDate.getMonth() === currentDate.getMonth() && selectedDate.getFullYear() === currentDate.getFullYear()
               const isToday = new Date().getDate() === dayNum && new Date().getMonth() === currentDate.getMonth() && new Date().getFullYear() === currentDate.getFullYear()
 
@@ -187,10 +311,10 @@ export function CalendarView() {
                 <p className="font-medium">Bu gün için planlanmış bir etkinlik yok.</p>
               </div>
             ) : (
-              currentEvents.map((ev, idx) => (
-                <div key={idx} className="flex items-center justify-between bg-sidebar border border-border p-4 rounded-xl group hover:border-primary/50 transition-colors">
-                  <span className="font-medium text-foreground text-sm">{ev}</span>
-                  <button onClick={() => handleDeleteEvent(idx)} className="p-2 text-muted-foreground hover:text-red-500 hover:bg-red-500/10 rounded-lg transition-colors opacity-0 group-hover:opacity-100 cursor-pointer">
+              currentEvents.map((ev) => (
+                <div key={ev.id} className="flex items-center justify-between bg-sidebar border border-border p-4 rounded-xl group hover:border-primary/50 transition-colors">
+                  <span className="font-medium text-foreground text-sm">{ev.title}</span>
+                  <button onClick={() => handleDeleteEvent(ev.id)} className="p-2 text-muted-foreground hover:text-red-500 hover:bg-red-500/10 rounded-lg transition-colors opacity-0 group-hover:opacity-100 cursor-pointer">
                     <Trash2 className="h-4 w-4" />
                   </button>
                 </div>
