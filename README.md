@@ -59,6 +59,13 @@ Sistem kaynaklarını minimum düzeyde tüketirken; akıllı müzik çalar, proj
 
 ---
 
+### ☁️ 5. Bulut Senkronu (Supabase)
+* **Anlık Yedekleme:** Notlar `Ctrl+S` ile hem yerel dosyaya hem **Supabase** `notes` tablosuna yazılır.
+* **Realtime:** Aynı hesaptan açılan diğer pencereler/cihazlar, veritabanı olaylarını (**INSERT/UPDATE/DELETE**) kanal üzerinden dinleyerek listeyi anında günceller.
+* **Offline-first:** Bağlantı yoksa uygulama `localStorage`'a düşer; sorun yaşamadan kullanmaya devam eder.
+
+---
+
 ## 🛠️ Kullanılan Teknolojiler
 
 * **Backend & Çekirdek:** Rust, Tauri 2.0 API, Native OS Commands (`std::process::Command`)[cite: 3]
@@ -74,5 +81,76 @@ Projeyi kendi bilgisayarınızda çalıştırmak veya derlemek için Node.js ve 
 
 1. Depoyu klonlayın:
    ```bash
-   git clone [https://github.com/KullaniciAdin/Ultimate-App.git](https://github.com/KullaniciAdin/Ultimate-App.git)
-   cd Ultimate-App
+   git clone https://github.com/bilalhabessimsek/ULTIMATE.git
+   cd ULTIMATE
+   ```
+
+2. Bağımlılıkları yükleyin:
+   ```bash
+   npm install
+   ```
+
+3. Ortam değişkenlerini ayarlayın:
+   ```bash
+   cp .env.example .env
+   ```
+   `.env` içine Supabase **Project URL** ve **Publishable key**'ini girin (aşağıya bakın).
+
+4. Geliştirme modunda çalıştırın:
+   ```bash
+   npm run tauri dev
+   ```
+
+5. Üretim derlemesi (Windows `.msi` / `.exe` dahil):
+   ```bash
+   npm run tauri build
+   ```
+
+---
+
+## ☁️ Supabase Kurulumu (Bulut Senkronu)
+
+Notların bulutta senkronize olması için tek seferlik kurulum gerekir:
+
+1. [supabase.com/dashboard](https://supabase.com/dashboard) adresinden projenizi açın.
+2. Proje ana sayfasındaki **`Connect`** butonuna tıklayın → **Project URL** ve **Publishable key**'i kopyalayın.
+3. Kopyaladıklarınızı `.env` dosyasına yazın:
+   ```env
+   VITE_SUPABASE_URL=https://<20-haneli-proje-ref>.supabase.co
+   VITE_SUPABASE_ANON_KEY=sb_publishable_...
+   ```
+   > ⚠️ **Project URL'deki ref'i birebir kopyalayın.** Tek bir harf hatası (ör. `g` ↔ `q`) DNS kaydını tamamen kırar ve hata "DNS adı yok" olarak görünür.
+
+4. **SQL** bölümünde şu politikaları çalıştırın (aksi halde okuma çalışır ama **yazma `42501` hatası** verir):
+   ```sql
+   do $$
+   begin
+     if not exists (select 1 from pg_policies where schemaname='public' and tablename='notes' and policyname='notes_select') then
+       create policy "notes_select" on public.notes for select using (true);
+     end if;
+     if not exists (select 1 from pg_policies where schemaname='public' and tablename='notes' and policyname='notes_insert') then
+       create policy "notes_insert" on public.notes for insert with check (true);
+     end if;
+     if not exists (select 1 from pg_policies where schemaname='public' and tablename='notes' and policyname='notes_update') then
+       create policy "notes_update" on public.notes for update using (true) with check (true);
+     end if;
+     if not exists (select 1 from pg_policies where schemaname='public' and tablename='notes' and policyname='notes_delete') then
+       create policy "notes_delete" on public.notes for delete using (true);
+     end if;
+   end $$;
+
+   do $$
+   begin
+     alter publication supabase_realtime add table public.notes;
+   exception when duplicate_object then
+     null;
+   end $$;
+   ```
+
+**Hızlı doğrulama (terminal):**
+```bash
+curl -s -H "apikey: $VITE_SUPABASE_ANON_KEY" \
+  "https://<proje-ref>.supabase.co/rest/v1/notes?select=id&limit=1"
+```
+`[]` veya JSON listesi döndüyse bağlantı çalışıyor demektir.
+
