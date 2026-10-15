@@ -159,3 +159,24 @@ Kurulum sırası önemli:
 
 Oturum yerelde saklandığı için uygulama her açılışta tekrar giriş istemez; çıkış için sol menüdeki **çıkış (LogOut)** butonu kullanılır.
 
+### 🔁 Şifre Sıfırlama (6 haneli kod)
+
+Masaüstü uygulamasında e-posta bağlantısı (magic link) özel URL şeması kaydı gerektirdiği için kırılgandır. Bu yüzden **kod (OTP)** yöntemi kullanılır:
+
+1. Giriş ekranı → **Şifremi unuttum** → e-postanı gir → *Sıfırlama Kodu Gönder*.
+2. Supabase e-posta gönderir. **Şablonun içinde kodu göstermen gerekir** (aşağıdaki adım).
+3. Uygulamaya 6 haneli kodu + yeni şifreyi gir → *Şifreyi Güncelle*.
+
+**Zorunlu tek ayar:** Dashboard → **Authentication → Email Templates → Reset Password** şablonunu aç ve şu satırı ekle (varsa linki silebilirsin):
+
+```html
+<h2>Şifre Sıfırlama</h2>
+<p>ULTIMATE hesabın için sıfırlama kodun:</p>
+<p style="font-size:28px;font-weight:bold;letter-spacing:6px">{{ .Token }}</p>
+<p>Bu kod 1 saat geçerlidir. Kodu uygulamadaki "Şifremi Unuttum" ekranına gir.</p>
+```
+
+> `{{ .Token }}` 6 haneli kodu basar. Şablonda bu değişken yoksa kullanıcı yalnızca link görür ve uygulamaya girecek kod bulamaz.
+> Kodun geçerlilik süresi: Authentication → Providers → Email → *Email OTP Expiry* (varsayılan 3600 sn).
+> Çok fazla kod istemek Supabase'in e-posta limitine takılır; kendi SMTP sunucunu (ör. Resend) bağlarsan limit kalkar.
+

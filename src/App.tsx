@@ -178,6 +178,8 @@ export default function App() {
   const [session, setSession] = useState<Session | null>(null)
   const [authReady, setAuthReady] = useState(false)
   const [storageReady, setStorageReady] = useState(false)
+  // Şifre sıfırlama sırasında oturum açılsa bile ana ekrana geçmeyi engeller
+  const [recoveryBusy, setRecoveryBusy] = useState(false)
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data }) => {
@@ -241,7 +243,7 @@ export default function App() {
     }
   }, [session, authReady])
 
-  if (!authReady || (session && !storageReady)) {
+  if (!authReady || (session && !storageReady && !recoveryBusy)) {
     return (
       <div className="flex h-screen w-full items-center justify-center bg-background text-sm text-muted-foreground">
         Yükleniyor...
@@ -251,8 +253,10 @@ export default function App() {
 
   // Oturum yoksa: giriş ekranı. Görünümler ancak giriş yapıldıktan sonra mount edilir,
   // böylece yetkisiz sorgu ve realtime aboneliği oluşmaz.
-  if (!session) {
-    return <LoginView />
+  // Şifre sıfırlama tamamlanana kadar (recoveryBusy) oturum açılmış olsa bile
+  // giriş ekranında kalınır; yeni şifre kaydedilip mesaj gösterilir.
+  if (!session || recoveryBusy) {
+    return <LoginView onRecoveryBusyChange={setRecoveryBusy} />
   }
 
   return (
