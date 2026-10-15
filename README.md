@@ -159,24 +159,18 @@ Kurulum sırası önemli:
 
 Oturum yerelde saklandığı için uygulama her açılışta tekrar giriş istemez; çıkış için sol menüdeki **çıkış (LogOut)** butonu kullanılır.
 
-### 🔁 Şifre Sıfırlama (6 haneli kod)
+### 🔁 Şifre Sıfırlama (bağlantı yapıştırma)
 
-Masaüstü uygulamasında e-posta bağlantısı (magic link) özel URL şeması kaydı gerektirdiği için kırılgandır. Bu yüzden **kod (OTP)** yöntemi kullanılır:
+Masaüstü uygulamasında e-posta bâglantısına tıklamak işe yaramaz (tarayıcıya `http://localhost:3000`'e gider). Bu yüzden uygulama, e-postadaki bağlantının **içindeki token**'ı okur:
 
-1. Giriş ekranı → **Şifremi unuttum** → e-postanı gir → *Sıfırlama Kodu Gönder*.
-2. Supabase e-posta gönderir. **Şablonun içinde kodu göstermen gerekir** (aşağıdaki adım).
-3. Uygulamaya 6 haneli kodu + yeni şifreyi gir → *Şifreyi Güncelle*.
+1. Giriş ekranı → **Şifremi unuttum** → e-postanı gir → *Sıfırlama Bağlantısı Gönder*.
+2. Gelen e-postada **"Reset password"** yazısına sağ tık → **Bağlantıyı kopyala**.
+3. Uygulamadaki kutuya yapıştır + yeni şifreyi belirle → *Şifreyi Güncelle*.
 
-**Zorunlu tek ayar:** Dashboard → **Authentication → Email Templates → Reset Password** şablonunu aç ve şu satırı ekle (varsa linki silebilirsin):
+Uygulama yapıştırılan metinden `token=` değerini ayıklar ve `supabase.auth.verifyOtp({ token_hash, type: 'recovery' })` ile oturumu açar, ardından şifreyi günceller.
 
-```html
-<h2>Şifre Sıfırlama</h2>
-<p>ULTIMATE hesabın için sıfırlama kodun:</p>
-<p style="font-size:28px;font-weight:bold;letter-spacing:6px">{{ .Token }}</p>
-<p>Bu kod 1 saat geçerlidir. Kodu uygulamadaki "Şifremi Unuttum" ekranına gir.</p>
-```
-
-> `{{ .Token }}` 6 haneli kodu basar. Şablonda bu değişken yoksa kullanıcı yalnızca link görür ve uygulamaya girecek kod bulamaz.
-> Kodun geçerlilik süresi: Authentication → Providers → Email → *Email OTP Expiry* (varsayılan 3600 sn).
-> Çok fazla kod istemek Supabase'in e-posta limitine takılır; kendi SMTP sunucunu (ör. Resend) bağlarsan limit kalkar.
+> **Neden kod (OTP) değil?** 6 haneli kod yöntemi e-posta şablonuna `{{ .Token }}` eklemeyi gerektirir; ancak Supabase ücretsiz planında **varsayılan mail servisi kullanılırken şablon düzenlenemez** (custom SMTP veya Pro plan gerekir). Bağlantı yapıştırma yöntemi hiçbir ayar gerektirmez ve varsayılan şablonla çalışır.
+>
+> Kod alanı da desteklenir: e-postada 6 haneli kod varsa (custom SMTP + `{{ .Token }}` şablonu kuruluysa) doğrudan o kod girilebilir.
+> Bağlantının geçerlilik süresi: Authentication → Providers → Email → *Email OTP Expiry* (varsayılan 3600 sn).
 

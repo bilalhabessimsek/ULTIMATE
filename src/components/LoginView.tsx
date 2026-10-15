@@ -19,7 +19,7 @@ export function LoginView({ onRecoveryBusyChange }: LoginViewProps) {
   const [mode, setMode] = useState<Mode>('login')
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
-  const [code, setCode] = useState('')
+  const [recoveryInput, setRecoveryInput] = useState('')
   const [newPassword, setNewPassword] = useState('')
   const [newPassword2, setNewPassword2] = useState('')
   const [isLoading, setIsLoading] = useState(false)
@@ -93,11 +93,11 @@ export function LoginView({ onRecoveryBusyChange }: LoginViewProps) {
       const { error } = await supabase.auth.resetPasswordForEmail(mail)
       if (error) throw error
 
-      setCode('')
+      setRecoveryInput('')
       setNewPassword('')
       setNewPassword2('')
       setMode('resetConfirm')
-      setInfo('E-postana 6 haneli bir sıfırlama kodu gönderdik. Kodu ve yeni şifreni gir.')
+      setInfo('E-postana sıfırlama bağlantısı gönderdik. Bağlantıyı kopyalayıp aşağıya yapıştır (6 haneli kod da geçerlidir).')
     } catch (err: any) {
       const message: string = err?.message || 'Kod gönderilemedi.'
       if (message.toLowerCase().includes('rate limit') || message.toLowerCase().includes('too many')) {
@@ -115,6 +115,25 @@ export function LoginView({ onRecoveryBusyChange }: LoginViewProps) {
     void requestResetCode()
   }
 
+  // E-postadaki baglantidan token_hash'i (veya 6 haneli kodu) cikarir
+  const parseRecoveryInput = (raw: string): { token?: string; tokenHash?: string } | null => {
+    const text = raw.trim()
+    if (!text) return null
+
+    // 1) 6 haneli kod (bosluk/tire ile yazilmis olabilir)
+    const digitsOnly = text.replace(/[\s-]/g, '')
+    if (/^\d{6}$/.test(digitsOnly)) return { token: digitsOnly }
+
+    // 2) Baglantidan token_hash cikar: ...?token=... veya ?token_hash=...
+    const fromUrl = text.match(/[?&]token(?:_hash)?=([A-Za-z0-9._\-]+)/)
+    if (fromUrl) return { tokenHash: fromUrl[1] }
+
+    // 3) Dogrudan token_hash yapistirilmis olabilir
+    if (/^[A-Za-z0-9._\-]{20,}$/.test(text)) return { tokenHash: text }
+
+    return null
+  }
+
   // 2. adım: kodu dogrula + yeni sifreyi kaydet
   const handleResetConfirm = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -122,13 +141,13 @@ export function LoginView({ onRecoveryBusyChange }: LoginViewProps) {
     setInfo(null)
 
     const mail = email.trim()
-    const token = code.replace(/\D/g, '')
-    if (!mail) {
-      setError('E-posta adresi eksik. Baştan başla.')
+    const parsed = parseRecoveryInput(recoveryInput)
+    if (!parsed) {
+      setError('E-postadaki sıfırlama bağlantısını yapıştır ya da 6 haneli kodu gir.')
       return
     }
-    if (token.length < 6) {
-      setError('E-postandaki 6 haneli kodu gir.')
+    if (parsed.token && !mail) {
+      setError('E-posta adresi eksik. Baştan başla.')
       return
     }
     if (newPassword.length < 6) {
@@ -145,11 +164,9 @@ export function LoginView({ onRecoveryBusyChange }: LoginViewProps) {
     onRecoveryBusyChange?.(true)
     let completed = false
     try {
-      const { error } = await supabase.auth.verifyOtp({
-        email: mail,
-        token,
-        type: 'recovery',
-      })
+      const { error } = parsed.tokenHash
+        ? await supabase.auth.verifyOtp({ token_hash: parsed.tokenHash, type: 'recovery' })
+        : await supabase.auth.verifyOtp({ email: mail, token: parsed.token!, type: 'recovery' })
       if (error) throw error
 
       const { error: updateError } = await supabase.auth.updateUser({ password: newPassword })
@@ -167,10 +184,10 @@ export function LoginView({ onRecoveryBusyChange }: LoginViewProps) {
       }
       onRecoveryBusyChange?.(false)
 
-      const message: string = err?.message || 'Kod doğrulanamadı.'
+      const message: string = err?.message || 'Doğrulanamadı.'
       const lower = message.toLowerCase()
       if (lower.includes('expired') || lower.includes('invalid') || lower.includes('token')) {
-        setError('Kod geçersiz veya süresi dolmuş. "Kodu tekrar gönder" ile yeni kod isteyebilirsin.')
+        setError('Bağlantı geçersiz veya süresi dolmuş. "Yeni bağlantı gönder" ile tekrar isteyebilirsin.')
       } else {
         setError(message)
       }
@@ -209,7 +226,7 @@ export function LoginView({ onRecoveryBusyChange }: LoginViewProps) {
               <div>
                 <p className="text-sm font-bold">Şifremi Unuttum</p>
                 <p className="text-[11px] text-muted-foreground">
-                  {mode === 'reset' ? 'E-postana kod gönderelim' : 'Kodu gir ve yeni şifreni belirle'}
+                  {mode === 'reset' ? 'E-postana sıfırlama bağlantısı gönderelim' : 'Bağlantıyı yapıştır ve yeni şifreni belirle'}
                 </p>
               </div>
             </div>
@@ -328,37 +345,39 @@ export function LoginView({ onRecoveryBusyChange }: LoginViewProps) {
                 className="mt-2 flex items-center justify-center gap-2 rounded-xl bg-primary px-6 py-3 font-bold text-primary-foreground shadow-md transition-colors hover:bg-primary/90 disabled:opacity-60 cursor-pointer"
               >
                 {isLoading ? <Loader2 className="h-5 w-5 animate-spin" /> : <Mail className="h-5 w-5" />}
-                Sıfırlama Kodu Gönder
+                Sıfırlama Bağlantısı Gönder
               </button>
 
               <p className="text-center text-[11px] text-muted-foreground">
-                E-postandaki 6 haneli kodu uygulamaya gireceksin.
+                E-postana gelen bağlantıyı uygulamaya yapıştıracaksın.
               </p>
             </form>
           )}
 
-          {/* --- Şifre sıfırlama: kod + yeni şifre --- */}
+          {/* --- Şifre sıfırlama: bağlantı/kod + yeni şifre --- */}
           {mode === 'resetConfirm' && (
             <form onSubmit={handleResetConfirm} className="flex flex-col gap-4">
               <p className="rounded-xl border border-border bg-background px-4 py-3 text-xs text-muted-foreground">
-                Kod gönderilen adres: <span className="font-semibold text-foreground">{email.trim()}</span>
+                Bağlantı gönderilen adres: <span className="font-semibold text-foreground">{email.trim()}</span>
               </p>
 
               <label className="flex flex-col gap-2">
-                <span className="text-xs font-bold uppercase tracking-wider text-muted-foreground">6 Haneli Kod</span>
-                <div className="flex items-center gap-3 rounded-xl border border-border bg-background px-4 py-3 shadow-inner focus-within:border-primary focus-within:ring-1 focus-within:ring-primary/50">
-                  <KeyRound className="h-4 w-4 text-muted-foreground" />
-                  <input
-                    type="text"
-                    inputMode="numeric"
-                    value={code}
-                    onChange={(e) => setCode(e.target.value.replace(/\D/g, '').slice(0, 6))}
-                    placeholder="000000"
-                    autoComplete="one-time-code"
+                <span className="text-xs font-bold uppercase tracking-wider text-muted-foreground">Sıfırlama Bağlantısı</span>
+                <div className="flex items-start gap-3 rounded-xl border border-border bg-background px-4 py-3 shadow-inner focus-within:border-primary focus-within:ring-1 focus-within:ring-primary/50">
+                  <KeyRound className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground" />
+                  <textarea
+                    rows={3}
+                    value={recoveryInput}
+                    onChange={(e) => setRecoveryInput(e.target.value)}
+                    placeholder="E-postadaki bağlantıyı buraya yapıştır (veya 6 haneli kodu yaz)"
                     autoFocus
-                    className="w-full bg-transparent text-lg font-bold tracking-[0.4em] outline-none"
+                    className="w-full resize-none bg-transparent text-xs leading-relaxed outline-none break-all"
                   />
                 </div>
+                <span className="text-[11px] leading-relaxed text-muted-foreground">
+                  E-postada <b>"Reset password"</b> yazısına sağ tık → <b>Bağlantıyı kopyala</b> → buraya yapıştır.
+                  Bağlantıya tıklamana gerek yok (o adres tarayıcıya gider).
+                </span>
               </label>
 
               <label className="flex flex-col gap-2">
@@ -417,7 +436,7 @@ export function LoginView({ onRecoveryBusyChange }: LoginViewProps) {
                 disabled={isLoading}
                 className="text-center text-[11px] font-medium text-muted-foreground transition-colors hover:text-primary disabled:opacity-60 cursor-pointer"
               >
-                Kod gelmedi mi? Tekrar gönder
+                E-posta gelmedi mi? Tekrar gönder
               </button>
             </form>
           )}
