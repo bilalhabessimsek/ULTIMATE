@@ -7,16 +7,20 @@ import {
   Search,
   Settings,
   FolderOpen, // KLASÖR İKONU EKLENDİ
+  CalendarDays, // TAKVİM İKONU EKLENDİ
   type LucideProps,
 } from 'lucide-react'
 import { NotesView } from './components/NotesView'
 import { GithubView } from './components/GithubView'
 import { PlayerView } from './components/PlayerView'
 import { ProjectsView } from './components/ProjectsView' // YEREL PROJELER EKRANI ÇAĞRILDI
+import { CalendarView } from './components/CalendarView' // TAKVİM EKRANI ÇAĞRILDI
+import { SetupWizard } from './components/SetupWizard' // İLK KURULUM SİHİRBAZI ÇAĞRILDI
 import { cn } from './lib/utils'
 
 // 4. MENÜ ID'Sİ EKLENDİ ('projects')
-type ViewId = 'notes' | 'github' | 'player' | 'projects'
+// 5. MENÜ ID'Sİ EKLENDİ ('calendar')
+type ViewId = 'notes' | 'calendar' | 'github' | 'player' | 'projects'
 
 interface NavItem {
   id: ViewId
@@ -26,6 +30,7 @@ interface NavItem {
 
 const NAV_ITEMS: readonly NavItem[] = [
   { id: 'notes', label: 'Notes', icon: FileText },
+  { id: 'calendar', label: 'Calendar', icon: CalendarDays }, // TAKVİM MENÜSÜ EKLENDİ
   { id: 'projects', label: 'Projects', icon: FolderOpen }, // YENİ MENÜ BUTONUMUZ
   { id: 'github', label: 'Repositories', icon: GitBranch },
   { id: 'player', label: 'Player', icon: Music },
@@ -108,6 +113,10 @@ const DesktopSidebar: FC<DesktopSidebarProps> = ({ currentView, onSetView }) => 
         BL
       </span>
     </div>
+
+    <div className="mt-3 mb-1 select-none font-mono text-[9px] text-zinc-700 [writing-mode:vertical-lr] rotate-180">
+      DEVELOPED BY BİLAL
+    </div>
   </aside>
 )
 
@@ -118,6 +127,9 @@ interface MobileNavProps {
 
 const MobileNav: FC<MobileNavProps> = ({ currentView, onSetView }) => (
   <nav className="fixed inset-x-0 bottom-0 z-40 flex h-16 items-center justify-around border-t border-border bg-sidebar/95 backdrop-blur md:hidden">
+    <div className="pointer-events-none absolute inset-x-0 -top-4 select-none text-center font-mono text-[9px] text-zinc-700">
+      DEVELOPED BY BİLAL
+    </div>
     {NAV_ITEMS.map(({ id, label, icon: Icon }) => (
       <button
         key={id}
@@ -147,6 +159,9 @@ export default function App() {
         <div className={cn("h-full w-full", view === 'notes' ? 'block' : 'hidden')}>
           <NotesView />
         </div>
+        <div className={cn("h-full w-full", view === 'calendar' ? 'block' : 'hidden')}>
+          <CalendarView />
+        </div>
         <div className={cn("h-full w-full", view === 'projects' ? 'block' : 'hidden')}>
           <ProjectsView />
         </div>
@@ -159,6 +174,9 @@ export default function App() {
       </main>
 
       <MobileNav currentView={view} onSetView={setView} />
+
+      {/* İLK KURULUM: Rainmeter widget kurulum sihirbazı */}
+      <SetupWizard />
     </div>
   )
 }

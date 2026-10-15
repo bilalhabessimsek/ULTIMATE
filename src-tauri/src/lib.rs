@@ -1,8 +1,10 @@
 use serde::Serialize;
 use std::fs;
 use std::io::Write;
-use std::path::Path;
-use std::process::Command; // İDE'leri başlatmak için gerekli
+use std::path::{Path, PathBuf};
+use std::process::Command;
+use tauri::path::BaseDirectory;
+use tauri::Manager;
 
 #[derive(Serialize, Clone)]
 pub struct Track {
@@ -53,8 +55,10 @@ fn read_audio_file(path: &str) -> Result<Vec<u8>, String> {
 #[tauri::command]
 fn save_txt_file(path: &str, content: &str) -> Result<(), String> {
     let mut file = std::fs::OpenOptions::new().write(true).create(true).truncate(true).open(path).map_err(|e| format!("Dosya açılamadı: {}", e))?;
-    file.write_all(b"\xEF\xBB\xBF").map_err(|e| format!("BOM yazılamadı: {}", e))?;
+    
+    // KRİTİK DÜZELTME: BOM (Görünmez karakter) söküldü! Lua scripti artık ilk satırı yutmayacak.
     file.write_all(content.as_bytes()).map_err(|e| format!("Dosyaya yazılamadı: {}", e))?;
+    
     Ok(())
 }
 
@@ -103,9 +107,6 @@ fn get_projects(folder_path: &str) -> Result<Vec<ProjectData>, String> {
     Ok(projects)
 }
 
-// ==========================================
-// KUSURSUZ İDE AÇICI (TÜM İDE'LER EKLENDİ)
-// ==========================================
 #[tauri::command]
 fn open_in_ide(path: &str, ide: &str) -> Result<(), String> {
     let is_win = cfg!(target_os = "windows");
@@ -153,13 +154,89 @@ fn open_in_ide(path: &str, ide: &str) -> Result<(), String> {
     Ok(())
 }
 
+// GÖMÜLÜ KAYNAK: resources/ klasöründeki dosyayı her iki modda da (dev + paketlenmiş) bulur.
+// Aday sırası:
+//   1) $RESOURCE/<dosya>              -> bundle.resources map/modu ile gömülmüş hali
+//   2) $RESOURCE/resources/<dosya>    -> liste tanımda yapı korunarak kopyalanan hali
+//   3) CARGO_MANIFEST_DIR/resources/  -> tauri dev'de doğrudan kaynak klasörden (build kopyası olmadan da çalışır)
+fn resolve_bundled_resource(app_handle: &tauri::AppHandle, file_name: &str) -> Result<PathBuf, String> {
+    let mut candidates: Vec<PathBuf> = Vec::new();
+
+    if let Ok(resource_dir) = app_handle.path().resource_dir() {
+        candidates.push(resource_dir.join(file_name));
+        candidates.push(resource_dir.join("resources").join(file_name));
+    }
+
+    if let Ok(resolved) = app_handle.path().resolve(file_name, BaseDirectory::Resource) {
+        candidates.push(resolved);
+    }
+
+    candidates.push(
+        PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("resources")
+            .join(file_name),
+    );
+
+    candidates
+        .into_iter()
+        .find(|path| path.exists())
+        .ok_or_else(|| {
+            format!(
+                "Gömülü kaynak bulunamadı: {}. Dosyayı src-tauri/resources/ klasörüne ekleyin.",
+                file_name
+            )
+        })
+}
+
+#[tauri::command]
+fn install_rainmeter_widgets(app_handle: tauri::AppHandle) -> Result<String, String> {
+    let is_win = cfg!(target_os = "windows");
+    if !is_win { return Err("Bu özellik sadece Windows'ta geçerlidir.".into()); }
+
+    let rainmeter_path = Path::new("C:\\Program Files\\Rainmeter\\Rainmeter.exe");
+    let skin_installer_path = Path::new("C:\\Program Files\\Rainmeter\\SkinInstaller.exe");
+
+    // Uygulama içine gömdüğümüz resources yollarını Tauri v2 API'si ile alıyoruz
+    let bundled_rainmeter_exe = resolve_bundled_resource(&app_handle, "Rainmeter-4.5.exe")?;
+    let bundled_skin = resolve_bundled_resource(&app_handle, "Ultimate.rmskin")?;
+
+    // 1. AŞAMA: Rainmeter kurulu mu diye bak
+    if !rainmeter_path.exists() {
+        // Kurulu değilse, kendi gömdüğümüz Rainmeter Setup'ını başlat
+        Command::new("cmd")
+            .arg("/C")
+            .arg(&bundled_rainmeter_exe)
+            .spawn()
+            .map_err(|e| format!("Rainmeter kurulumu başlatılamadı: {}", e))?;
+
+        return Ok("RAINMETER_SETUP_STARTED".into());
+    }
+
+    // 2. AŞAMA: Rainmeter kuruluysa, bizim .rmskin paketimizi otomatik kur!
+    if skin_installer_path.exists() {
+        Command::new(skin_installer_path)
+            .arg(&bundled_skin)
+            .spawn()
+            .map_err(|e| format!("Tema kurulamadı: {}", e))?;
+
+        // Temayı anında ekranda göster
+        let _ = Command::new(rainmeter_path)
+            .args(["!ActivateConfig", "Ultimate", "Ultimate.ini"])
+            .spawn();
+
+        return Ok("WIDGET_INSTALLED".into());
+    }
+
+    Err("Bilinmeyen bir hata oluştu.".into())
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_fs::init()) 
         .plugin(tauri_plugin_dialog::init()) 
-        .invoke_handler(tauri::generate_handler![scan_music_folder, read_audio_file, save_txt_file, get_projects, open_in_ide]) 
+        .invoke_handler(tauri::generate_handler![scan_music_folder, read_audio_file, save_txt_file, get_projects, open_in_ide, install_rainmeter_widgets]) 
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }

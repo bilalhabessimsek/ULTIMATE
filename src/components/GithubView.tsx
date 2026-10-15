@@ -46,9 +46,7 @@ export function GithubView() {
     
     try {
       const res = await fetch(`https://api.github.com/users/${github.trim()}/repos?per_page=100`)
-      
       if (!res.ok) throw new Error('Kullanıcı bulunamadı veya GitHub API limiti aşıldı.')
-
       const data = await res.json()
 
       const mappedRepos = data.filter((r: any) => !r.fork).map((r: any) => ({
@@ -149,16 +147,12 @@ export function GithubView() {
   const handlePreviewATS = () => {
     const cleanLinkedin = linkedin ? linkedin.replace('https://', '').replace('www.', '') : 'linkedin.com/in/kullaniciadi';
     const cleanWebsite = website ? website.replace('https://', '').replace('www.', '') : 'Web Siteniz Yok';
-    const cleanSchool = school.trim() ? school : 'Üniversite ve Bölüm Bilgisi Girilmedi';
 
     const achievementsList = [
       "Temiz kod (Clean Code) prensipleri benimsendi ve modüler bir mimari kurgulandı.",
       "Asenkron veri işleme ve performans optimizasyonları yapılarak sistem verimliliği artırıldı.",
       "Kullanıcı deneyimi (UX) göz önünde bulundurularak modern ve duyarlı bir arayüz geliştirildi.",
-      "Hata ayıklama (debugging) süreçleri titizlikle yürütüldü ve kod kararlılığı sağlandı.",
-      "Versiyon kontrol sistemleri (Git) ile sürdürülebilir geliştirme standartları uygulandı.",
-      "Güvenli kodlama pratikleri izlendi ve sistemin altyapısı güçlendirildi.",
-      "Geliştirilebilir ve ölçeklenebilir (scalable) bir sistem tasarımı oluşturuldu."
+      "Hata ayıklama (debugging) süreçleri titizlikle yürütüldü ve kod kararlılığı sağlandı."
     ];
 
     const generatedContent = `=================================================================\r
@@ -180,15 +174,8 @@ Kavramlar    : Çapraz Platform Geliştirme, Sistem Performans Takibi, UI/UX Tas
 --- TEKNİK PROJELER ---\r
 \r
 ${repos.map((repo, index) => {
-  // TÜRKÇE DOSTU İSİM DÜZELTİCİ (Tireleri boşluk yap, baş harfleri büyüt)
-  const formattedName = repo.name
-    .replace(/[-_]/g, ' ')
-    .split(' ')
-    .map((word: string) => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase())
-    .join(' ');
-    
+  const formattedName = repo.name.replace(/[-_]/g, ' ').split(' ').map((word: string) => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase()).join(' ');
   const techStack = repo.lang !== 'Çeşitli' && repo.lang !== null ? `${repo.lang}, Git/GitHub` : 'Çeşitli Teknolojiler, Git/GitHub';
-  
   return `🔹 Proje Adı: ${formattedName} ${repo.archived ? '(Arşivlenmiş)' : ''}\r
    Teknoloji: ${techStack}\r
    Detaylar : ${repo.desc}\r
@@ -201,7 +188,7 @@ ${repos.map((repo, index) => {
 • C dilinde yapılandırılmış karmaşık veri algoritmalarının entegrasyonu ve yönetimi.\r
 \r
 --- EĞİTİM ---\r
-🎓 ${cleanSchool}\r
+🎓 ${school || 'Üniversite ve Bölüm Bilgisi Girilmedi'}\r
 \r
 =================================================================\r
 NOT: Bu CV, ATS (Yapay Zeka Aday Takip Sistemleri) okuyucularından \r
@@ -217,16 +204,110 @@ maksimum puan almak üzere anahtar kelime optimizasyonuyla hazırlanmıştır.\r
       const savePath = await save({ 
         defaultPath: `${github || 'Profil'}_ATS_CV`, 
         filters: [
-          { name: 'Word Belgesi (PDF Yapılabilir)', extensions: ['doc'] },
-          { name: 'Markdown Metni', extensions: ['md'] },
-          { name: 'Düz Metin', extensions: ['txt'] }
+          { name: 'Web Sayfası / PDF Çıktısı (.html)', extensions: ['html'] },
+          { name: 'Markdown Metni (.md)', extensions: ['md'] },
+          { name: 'Düz Metin (.txt)', extensions: ['txt'] }
         ] 
       });
 
       if (savePath) {
-        await invoke('save_txt_file', { path: savePath, content: cvPreview });
-        alert('🚀 ATS Uyumlu CV Başarıyla Oluşturuldu ve Kaydedildi!');
+        let contentToSave = cvPreview;
+
+        // KUSURSUZ PDF DÖNÜŞÜMÜ İÇİN HTML TASARIMI
+        if (savePath.endsWith('.html')) {
+          const cleanLinkedin = linkedin ? linkedin.replace('https://', '').replace('www.', '') : 'linkedin.com/in/kullaniciadi';
+          const cleanWebsite = website ? website.replace('https://', '').replace('www.', '') : 'Web Siteniz Yok';
+          const achievementsList = [
+            "Temiz kod (Clean Code) prensipleri benimsendi ve modüler bir mimari kurgulandı.",
+            "Asenkron veri işleme ve performans optimizasyonları yapılarak sistem verimliliği artırıldı.",
+            "Kullanıcı deneyimi (UX) göz önünde bulundurularak modern ve duyarlı bir arayüz geliştirildi.",
+            "Hata ayıklama (debugging) süreçleri titizlikle yürütüldü ve kod kararlılığı sağlandı."
+          ];
+
+          contentToSave = `<!DOCTYPE html>
+<html lang="tr">
+<head>
+  <meta charset="UTF-8">
+  <title>${github || 'Kullanıcı'} - Özgeçmiş</title>
+  <style>
+    body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; line-height: 1.6; max-width: 800px; margin: 40px auto; color: #111; padding: 20px; }
+    h1 { text-align: center; font-size: 28px; margin-bottom: 5px; color: #000; text-transform: uppercase; }
+    .contact { text-align: center; font-size: 13px; color: #444; margin-bottom: 25px; border-bottom: 2px solid #333; padding-bottom: 20px; }
+    h2 { color: #2a52be; font-size: 16px; border-bottom: 1px solid #ccc; padding-bottom: 5px; margin-top: 25px; text-transform: uppercase; }
+    p { margin-bottom: 8px; font-size: 14px; }
+    ul { margin-top: 5px; margin-bottom: 15px; padding-left: 20px; }
+    li { font-size: 14px; margin-bottom: 4px; }
+    .project { margin-bottom: 15px; }
+    .project-header { display: flex; justify-content: space-between; align-items: baseline; }
+    .project-title { font-weight: bold; font-size: 15px; color: #111; }
+    .tech { font-size: 12px; color: #666; font-style: italic; }
+    @media print {
+      body { margin: 0; padding: 0; max-width: 100%; }
+      .no-print { display: none !important; }
+    }
+  </style>
+</head>
+<body>
+  <div class="no-print" style="background: #2a52be; color: white; padding: 12px; text-align: center; font-weight: bold; margin-bottom: 20px; border-radius: 6px; box-shadow: 0 4px 6px rgba(0,0,0,0.1);">
+    📄 PDF OLARAK KAYDETMEK İÇİN:<br>Klavyeden CTRL + P tuşlarına basın ve Hedef kısmından "PDF Olarak Kaydet" seçeneğini seçin.
+  </div>
+  
+  <h1>BİLAL HABEŞ ŞİMŞEK</h1>
+  <div class="contact">
+    E-posta: [Email Adresiniz] | Tel: [Telefon Numaranız] | Ankara, Türkiye<br>
+    github.com/${github || 'bilalhabessimsek'} | ${cleanLinkedin} | ${cleanWebsite}
+  </div>
+  
+  <h2>PROFESYONEL ÖZET</h2>
+  <p>Modern masaüstü teknolojileri (Tauri, React, TypeScript), sistem programlama (C) ve mobil uygulama geliştirme (Kotlin) alanlarında tutkulu Yazılım Geliştirici. Temiz mimari, donanım optimizasyonu ve kullanıcı odaklı UI/UX tasarımı konularında deneyimli. Sürekli öğrenmeye ve yerel yapay zeka entegrasyonlarına açık.</p>
+  
+  <h2>YETENEKLER VE DİLLER</h2>
+  <ul>
+    <li><strong>Teknolojiler:</strong> ${skills}</li>
+    <li><strong>Yabancı Dil:</strong> ${spokenLangs}</li>
+    <li><strong>Kavramlar:</strong> Çapraz Platform Geliştirme, Sistem Performans Takibi, UI/UX Tasarım, Asenkron Mimari</li>
+  </ul>
+  
+  <h2>TEKNİK PROJELER</h2>
+  ${repos.map((repo, index) => {
+    const formattedName = repo.name.replace(/[-_]/g, ' ').split(' ').map((w: string) => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase()).join(' ');
+    const techStack = repo.lang !== 'Çeşitli' && repo.lang !== null ? `${repo.lang}, Git/GitHub` : 'Çeşitli Teknolojiler, Git/GitHub';
+    return `
+    <div class="project">
+      <div class="project-header">
+        <span class="project-title">🔹 ${formattedName} ${repo.archived ? '(Arşivlenmiş)' : ''}</span>
+        <span class="tech">${techStack}</span>
+      </div>
+      <p style="margin-top: 4px; margin-bottom: 4px; color: #444;">${repo.desc}</p>
+      <ul>
+        <li>${achievementsList[index % achievementsList.length]}</li>
+      </ul>
+    </div>`;
+  }).join('')}
+  
+  <h2>DENEYİM & GELİŞİM</h2>
+  <ul>
+    <li>Çeşitli cross-platform uygulamalarının arayüz modernizasyonları ve performans iyileştirmeleri.</li>
+    <li>Android cihazlarda sistem kaynaklarını (FPS, RAM, Hafıza) arka planda asenkron olarak izleyen Overlay servisleri geliştirimi.</li>
+    <li>C dilinde yapılandırılmış karmaşık veri algoritmalarının entegrasyonu ve yönetimi.</li>
+  </ul>
+
+  <h2>EĞİTİM</h2>
+  <p>🎓 <strong>${school || 'Üniversite ve Bölüm Bilgisi Girilmedi'}</strong></p>
+</body>
+</html>`;
+        }
+
+        await invoke('save_txt_file', { path: savePath, content: contentToSave });
         setCvPreview(null);
+        
+        // EĞER HTML İNDİRDİYSE DOĞRUDAN TARAYICIDA AÇSIN (PDF İÇİN)
+        if (savePath.endsWith('.html')) {
+          alert('🚀 Dosya kaydedildi! Tarayıcınızda açılıyor...\n(PDF almak için tarayıcı açılınca CTRL+P yapıp "PDF Olarak Kaydet" diyebilirsiniz.)');
+          await invoke('open_in_ide', { path: savePath, ide: 'explorer' });
+        } else {
+          alert(`🚀 CV Başarıyla [${savePath.split('.').pop()}] Formatında Kaydedildi!`);
+        }
       }
     } catch (err) {
       console.error("CV Kaydetme Hatası:", err);
@@ -248,7 +329,7 @@ maksimum puan almak üzere anahtar kelime optimizasyonuyla hazırlanmıştır.\r
             </div>
             
             <div className="flex-1 overflow-hidden flex flex-col gap-2">
-              <p className="text-sm text-muted-foreground shrink-0">İndirmeden önce özgeçmişinde dilediğin gibi ekleme ve çıkarma yapabilirsin.</p>
+              <p className="text-sm text-muted-foreground shrink-0">İndirmeden önce özgeçmişinde dilediğin gibi ekleme ve çıkarma yapabilirsin. <b>"Web Sayfası / PDF"</b> seçeneği ile orijinal tasarım çıktısı alabilirsin.</p>
               <textarea
                 value={cvPreview}
                 onChange={e => setCvPreview(e.target.value)}

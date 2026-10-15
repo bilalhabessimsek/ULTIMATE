@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<WixLocalization Culture="en-us" Codepage="1254" xmlns="http://schemas.microsoft.com/wix/2006/localization">
+  <String Id="TauriLanguage">1033</String>
+  <String Id="TauriCodepage">1254</String>
+  <String Id="LaunchApp">Launch Ultimate Asistan</String>
+  <String Id="DowngradeErrorMessage">A newer version of Ultimate Asistan is already installed.</String>
+  <String Id="PathEnvVarFeature">Add the install location of the Ultimate Asistan executable to the PATH system environment variable. This allows the Ultimate Asistan executable to be called from any location.</String>
+  <String Id="InstallAppFeature">Installs Ultimate Asistan.</String>
+</WixLocalization>

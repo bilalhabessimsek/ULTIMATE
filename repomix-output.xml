@@ -47,10 +47,12 @@ src/
   assets/
     react.svg
   components/
+    CalendarView.tsx
     GithubView.tsx
     NotesView.tsx
     PlayerView.tsx
     ProjectsView.tsx
+    SetupWizard.tsx
   lib/
     utils.ts
   App.css
@@ -77,6 +79,9 @@ src-tauri/
     Square71x71Logo.png
     Square89x89Logo.png
     StoreLogo.png
+  resources/
+    .gitkeep
+    README.md
   src/
     lib.rs
     main.rs
@@ -85,6 +90,7 @@ src-tauri/
   Cargo.toml
   tauri.conf.json
 .gitignore
+.project
 index.html
 package.json
 README.md
@@ -95,6 +101,350 @@ vite.config.ts
 
 <files>
 This section contains the contents of the repository's files.
+
+<file path="src/components/CalendarView.tsx">
+import { useState, useEffect } from 'react'
+import { CalendarDays, ChevronLeft, ChevronRight, Plus, Trash2, MonitorSmartphone } from 'lucide-react'
+import { cn } from '../lib/utils'
+import { invoke } from '@tauri-apps/api/core'
+import { open } from '@tauri-apps/plugin-dialog'
+
+export function CalendarView() {
+  const [currentDate, setCurrentDate] = useState(new Date())
+  const [selectedDate, setSelectedDate] = useState(new Date())
+  const [events, setEvents] = useState<Record<string, string[]>>({})
+  const [newEventText, setNewEventText] = useState('')
+  const [rainmeterPath, setRainmeterPath] = useState<string | null>(localStorage.getItem('rainmeter_event_path'))
+
+  // Kayıtlı etkinlikleri yükle
+  useEffect(() => {
+    const saved = localStorage.getItem('ultimate_events')
+    if (saved) setEvents(JSON.parse(saved))
+  }, [])
+
+  // Etkinlikleri kaydet ve Rainmeter'ı güncelle
+  useEffect(() => {
+    localStorage.setItem('ultimate_events', JSON.stringify(events))
+    syncWithRainmeter()
+  }, [events, selectedDate])
+
+  const daysInMonth = new Date(currentDate.getFullYear(), currentDate.getMonth() + 1, 0).getDate()
+  const firstDayOfMonth = new Date(currentDate.getFullYear(), currentDate.getMonth(), 1).getDay()
+  // Pazar = 0 olduğu için Pazartesi'yi 1 yapmak üzere ufak bir matematik:
+  const startOffset = firstDayOfMonth === 0 ? 6 : firstDayOfMonth - 1
+
+  const monthNames = ["Ocak", "Şubat", "Mart", "Nisan", "Mayıs", "Haziran", "Temmuz", "Ağustos", "Eylül", "Ekim", "Kasım", "Aralık"]
+  const dayNames = ["Pt", "Sa", "Ça", "Pe", "Cu", "Ct", "Pz"]
+
+  const formatDateKey = (date: Date) => {
+    return `${date.getFullYear()}-${date.getMonth() + 1}-${date.getDate()}`
+  }
+
+  const handlePrevMonth = () => setCurrentDate(new Date(currentDate.getFullYear(), currentDate.getMonth() - 1, 1))
+  const handleNextMonth = () => setCurrentDate(new Date(currentDate.getFullYear(), currentDate.getMonth() + 1, 1))
+
+  const handleAddEvent = (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!newEventText.trim()) return
+    const key = formatDateKey(selectedDate)
+    const dayEvents = events[key] || []
+    setEvents({ ...events, [key]: [...dayEvents, newEventText.trim()] })
+    setNewEventText('')
+  }
+
+  const handleDeleteEvent = (index: number) => {
+    const key = formatDateKey(selectedDate)
+    const dayEvents = events[key] || []
+    const newDayEvents = dayEvents.filter((_, i) => i !== index)
+    setEvents({ ...events, [key]: newDayEvents })
+  }
+
+  // RAINMETER BAĞLANTISI (Tüm Etkinlikleri Formata Uygun Şekilde Yazar)
+  const syncWithRainmeter = async () => {
+    if (!rainmeterPath) return
+    
+    let content = ""
+    // Tüm günleri dönüp dosyaya alt alta basıyoruz
+    for (const [dateKey, dayEvents] of Object.entries(events)) {
+      if (dayEvents.length > 0) {
+         content += `[${dateKey}]\n`
+         content += dayEvents.map(e => "▪ " + e).join('\n') + "\n\n"
+      }
+    }
+
+    try {
+      // İçerik boş olsa bile txt dosyasını temizlemek için gönderiyoruz
+      await invoke('save_txt_file', { path: rainmeterPath, content: content || " " })
+    } catch (err) {
+      console.error('Rainmeter Sync Hatası:', err)
+    }
+  }
+
+  const setupRainmeter = async () => {
+    try {
+      const path = await open({
+        multiple: false,
+        filters: [{ name: 'Rainmeter Ayar Dosyası', extensions: ['inc', 'txt'] }],
+        title: "Rainmeter için 'events.inc' veya 'events.txt' dosyasını seçin"
+      })
+      if (path && typeof path === 'string') {
+        setRainmeterPath(path)
+        localStorage.setItem('rainmeter_event_path', path)
+        alert('Takvim başarıyla Rainmeter widget\'ına bağlandı!')
+        syncWithRainmeter()
+      }
+    } catch(e) { console.error(e) }
+  }
+
+  const selectedKey = formatDateKey(selectedDate)
+  const currentEvents = events[selectedKey] || []
+
+  return (
+    <div className="flex h-full w-full flex-col md:flex-row relative">
+
+      {/* SOL PANEL: TAKVİM */}
+      <div className="flex w-full shrink-0 flex-col border-r border-border bg-sidebar md:w-[450px] z-10 p-8">
+        <div className="flex items-center justify-between mb-8">
+          <h1 className="flex items-center gap-2 text-2xl font-bold tracking-tight text-foreground">
+            <CalendarDays className="h-7 w-7 text-primary" /> Takvim
+          </h1>
+          <button
+            onClick={setupRainmeter}
+            className={cn("flex h-10 w-10 items-center justify-center rounded-xl transition-colors cursor-pointer shadow-sm", rainmeterPath ? "bg-green-500/10 text-green-500" : "bg-secondary hover:bg-primary hover:text-primary-foreground")}
+            title="Rainmeter'a Bağla"
+          >
+            <MonitorSmartphone className="h-5 w-5" />
+          </button>
+        </div>
+
+        <div className="bg-background border border-border rounded-2xl p-6 shadow-sm">
+          <div className="flex items-center justify-between mb-6">
+            <button onClick={handlePrevMonth} className="p-2 rounded-lg hover:bg-secondary transition-colors cursor-pointer"><ChevronLeft className="h-5 w-5 text-primary" /></button>
+            <h2 className="text-xl font-black tracking-wider uppercase">{monthNames[currentDate.getMonth()]} {currentDate.getFullYear()}</h2>
+            <button onClick={handleNextMonth} className="p-2 rounded-lg hover:bg-secondary transition-colors cursor-pointer"><ChevronRight className="h-5 w-5 text-primary" /></button>
+          </div>
+
+          <div className="grid grid-cols-7 gap-2 mb-2">
+            {dayNames.map(day => (
+              <div key={day} className="text-center text-xs font-bold text-muted-foreground pb-2">{day}</div>
+            ))}
+          </div>
+
+          <div className="grid grid-cols-7 gap-2">
+            {Array.from({ length: startOffset }).map((_, i) => (
+              <div key={`empty-${i}`} className="h-10 rounded-xl bg-transparent" />
+            ))}
+
+            {Array.from({ length: daysInMonth }).map((_, i) => {
+              const dayNum = i + 1
+              const cellDate = new Date(currentDate.getFullYear(), currentDate.getMonth(), dayNum)
+              const cellKey = formatDateKey(cellDate)
+              const hasEvents = events[cellKey] && events[cellKey].length > 0
+              const isSelected = selectedDate.getDate() === dayNum && selectedDate.getMonth() === currentDate.getMonth() && selectedDate.getFullYear() === currentDate.getFullYear()
+              const isToday = new Date().getDate() === dayNum && new Date().getMonth() === currentDate.getMonth() && new Date().getFullYear() === currentDate.getFullYear()
+
+              return (
+                <button
+                  key={dayNum}
+                  onClick={() => setSelectedDate(cellDate)}
+                  className={cn(
+                    "relative h-10 rounded-xl flex items-center justify-center text-sm font-bold transition-all cursor-pointer",
+                    isSelected ? "bg-primary text-primary-foreground shadow-md scale-105" : "bg-sidebar border border-border hover:border-primary/50 text-foreground",
+                    isToday && !isSelected && "text-primary border-primary/50"
+                  )}
+                >
+                  {dayNum}
+                  {hasEvents && !isSelected && <span className="absolute bottom-1.5 w-1.5 h-1.5 bg-primary rounded-full" />}
+                </button>
+              )
+            })}
+          </div>
+        </div>
+      </div>
+
+      {/* SAĞ PANEL: ETKİNLİKLER */}
+      <div className="flex min-h-0 flex-1 flex-col bg-background relative p-8 md:p-12 overflow-y-auto">
+        <div className="max-w-3xl w-full mx-auto flex flex-col h-full">
+          <div className="mb-10 border-b border-border pb-6">
+            <h2 className="text-4xl font-black tracking-tight text-primary mb-2">
+              {selectedDate.getDate()} {monthNames[selectedDate.getMonth()]} {selectedDate.getFullYear()}
+            </h2>
+            <p className="text-muted-foreground font-medium">Bu güne ait etkinlikleri ve notları yönetin.</p>
+          </div>
+
+          <form onSubmit={handleAddEvent} className="flex gap-3 mb-8">
+            <input
+              type="text"
+              value={newEventText}
+              onChange={(e) => setNewEventText(e.target.value)}
+              placeholder="Yeni etkinlik ekle..."
+              className="flex-1 bg-sidebar border border-border rounded-xl px-4 py-3 text-sm focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary/50 shadow-inner"
+            />
+            <button type="submit" disabled={!newEventText.trim()} className="flex items-center gap-2 bg-primary text-primary-foreground px-6 py-3 rounded-xl font-bold hover:bg-primary/90 disabled:opacity-50 transition-colors shadow-md cursor-pointer">
+              <Plus className="h-5 w-5" /> Ekle
+            </button>
+          </form>
+
+          <div className="flex-1 flex flex-col gap-3">
+            {currentEvents.length === 0 ? (
+              <div className="flex flex-col items-center justify-center h-40 text-muted-foreground opacity-50 border-2 border-dashed border-border rounded-2xl">
+                <CalendarDays className="h-10 w-10 mb-3" />
+                <p className="font-medium">Bu gün için planlanmış bir etkinlik yok.</p>
+              </div>
+            ) : (
+              currentEvents.map((ev, idx) => (
+                <div key={idx} className="flex items-center justify-between bg-sidebar border border-border p-4 rounded-xl group hover:border-primary/50 transition-colors">
+                  <span className="font-medium text-foreground text-sm">{ev}</span>
+                  <button onClick={() => handleDeleteEvent(idx)} className="p-2 text-muted-foreground hover:text-red-500 hover:bg-red-500/10 rounded-lg transition-colors opacity-0 group-hover:opacity-100 cursor-pointer">
+                    <Trash2 className="h-4 w-4" />
+                  </button>
+                </div>
+              ))
+            )}
+          </div>
+        </div>
+      </div>
+
+    </div>
+  )
+}
+</file>
+
+<file path="src/components/SetupWizard.tsx">
+import { useState, useEffect } from 'react'
+import { invoke } from '@tauri-apps/api/core'
+import { MonitorSmartphone, CheckCircle2, DownloadCloud } from 'lucide-react'
+
+export function SetupWizard() {
+  const [showWizard, setShowWizard] = useState(false)
+  const [status, setStatus] = useState<'idle' | 'installing' | 'done'>('idle')
+
+  useEffect(() => {
+    // Uygulama ilk kez mi açılıyor kontrolü
+    const isFirstLaunch = localStorage.getItem('ultimate_first_launch')
+    if (!isFirstLaunch) {
+      setShowWizard(true)
+    }
+  }, [])
+
+  const handleInstall = async () => {
+    setStatus('installing')
+    try {
+      const result = await invoke<string>('install_rainmeter_widgets')
+
+      if (result === 'RAINMETER_SETUP_STARTED') {
+        alert("Ekrana gelen Rainmeter kurulumunu tamamlayın. Ardından widget'lar otomatik eklenecektir.")
+      }
+
+      setStatus('done')
+      setTimeout(() => closeWizard(), 2000)
+    } catch (err) {
+      alert("Kurulum hatası: " + err)
+      setStatus('idle')
+    }
+  }
+
+  const closeWizard = () => {
+    localStorage.setItem('ultimate_first_launch', 'done')
+    setShowWizard(false)
+  }
+
+  if (!showWizard) return null
+
+  return (
+    <div className="fixed inset-0 z-[999] flex items-center justify-center bg-background/90 backdrop-blur-md p-4">
+      <div className="bg-sidebar border border-border rounded-2xl p-8 max-w-md w-full shadow-2xl flex flex-col items-center text-center animate-in zoom-in-95 duration-300">
+        
+        <div className="h-20 w-20 bg-primary/10 rounded-full flex items-center justify-center mb-6">
+          <MonitorSmartphone className="h-10 w-10 text-primary" />
+        </div>
+        
+        <h2 className="text-2xl font-black mb-2">Masaüstü Deneyimini Yükselt</h2>
+        <p className="text-muted-foreground text-sm mb-8 leading-relaxed">
+          Ultimate Asistan, gücünü masaüstüne taşımak için özel widget'larla gelir. Kurulumu otomatik yapmamızı ister misin?
+        </p>
+
+        {status === 'idle' && (
+          <div className="flex gap-3 w-full">
+            <button onClick={closeWizard} className="flex-1 py-3 rounded-xl font-bold text-muted-foreground hover:bg-secondary transition-colors cursor-pointer">
+              Atla
+            </button>
+            <button onClick={handleInstall} className="flex-[2] py-3 rounded-xl font-bold bg-primary text-primary-foreground hover:bg-primary/90 transition-colors flex items-center justify-center gap-2 cursor-pointer shadow-md">
+              <DownloadCloud className="h-5 w-5" /> Kurulumu Başlat
+            </button>
+          </div>
+        )}
+
+        {status === 'installing' && (
+          <div className="w-full flex flex-col items-center text-primary animate-pulse font-bold">
+            <DownloadCloud className="h-8 w-8 mb-2" />
+            Sistem Entegre Ediliyor...
+          </div>
+        )}
+
+        {status === 'done' && (
+          <div className="w-full flex flex-col items-center text-green-500 font-bold">
+            <CheckCircle2 className="h-8 w-8 mb-2" />
+            Kurulum Tamamlandı!
+          </div>
+        )}
+      </div>
+    </div>
+  )
+}
+</file>
+
+<file path="src-tauri/resources/.gitkeep">
+
+</file>
+
+<file path="src-tauri/resources/README.md">
+# resources/ — Gömülü Kurulum Dosyaları
+
+Bu klasör, `tauri build` ile üretim (`.exe`/`.msi`) yaparken uygulamanın **içine gömülür**.
+
+## Beklenen dosyalar
+
+| Dosya | Ne işe yarar |
+|---|---|
+| `Rainmeter-4.5.exe` | Kullanıcıda Rainmeter yoksa sessizce kurmak için resmi kurulum dosyası |
+| `Ultimate.rmskin` | Sizin widget'larınızın (Günün Olayı vb.) paketlenmiş hali |
+
+## Nereden alınır
+
+1. **Rainmeter-4.5.exe** → <https://www.rainmeter.net> sayfasından indirilir, adı tam olarak `Rainmeter-4.5.exe` olacak şekilde bu klasöre kopyalanır.
+2. **Ultimate.rmskin** → Rainmeter içinde sağ alttaki damla ikonuna tıklayıp
+   "Paket Oluştur / Create .rmskin" diyerek mevcut temanız tek tıkla paketlenir.
+   Paket adını `Ultimate.rmskin` yapıp bu klasöre koyun.
+
+## Notlar (önemli)
+
+- `tauri.conf.json > bundle > resources` şu anda `resources/**/*` glob'u ile tanımlı.
+  Klasörde eşleşen **en az bir** dosya yoksa `tauri dev`/`tauri build`
+  hata verir. Klasör şimdilik `.gitkeep` sayesinde doludur; gerçek dosyaları
+  eklediğinizde hiçbir yapılandırma değişikliği gerekmez.
+- Kod tarafında `src-tauri/src/lib.rs` içindeki `resolve_bundled_resource`
+  hem development hem paketlenmiş kurulumda dosyaları bulur:
+  1. `$RESOURCE/<dosya>`
+  2. `$RESOURCE/resources/<dosya>`
+  3. `src-tauri/resources/<dosya>` (geliştirme modu)
+- Komut Rust tarafında: `install_rainmeter_widgets` (invoke_handler'a kayıtlı).
+  React tarafı: `src/components/SetupWizard.tsx` → `App.tsx` içinde render edilir.
+</file>
+
+<file path=".project">
+<?xml version="1.0" encoding="UTF-8"?>
+<projectDescription>
+	<name>ULTİMATE</name>
+	<comment></comment>
+	<projects>
+	</projects>
+	<buildSpec>
+	</buildSpec>
+	<natures>
+	</natures>
+</projectDescription>
+</file>
 
 <file path="public/tauri.svg">
 <svg width="206" height="231" viewBox="0 0 206 231" fill="none" xmlns="http://www.w3.org/2000/svg">
@@ -162,9 +512,7 @@ export function GithubView() {
     
     try {
       const res = await fetch(`https://api.github.com/users/${github.trim()}/repos?per_page=100`)
-      
       if (!res.ok) throw new Error('Kullanıcı bulunamadı veya GitHub API limiti aşıldı.')
-
       const data = await res.json()
 
       const mappedRepos = data.filter((r: any) => !r.fork).map((r: any) => ({
@@ -265,16 +613,12 @@ export function GithubView() {
   const handlePreviewATS = () => {
     const cleanLinkedin = linkedin ? linkedin.replace('https://', '').replace('www.', '') : 'linkedin.com/in/kullaniciadi';
     const cleanWebsite = website ? website.replace('https://', '').replace('www.', '') : 'Web Siteniz Yok';
-    const cleanSchool = school.trim() ? school : 'Üniversite ve Bölüm Bilgisi Girilmedi';
 
     const achievementsList = [
       "Temiz kod (Clean Code) prensipleri benimsendi ve modüler bir mimari kurgulandı.",
       "Asenkron veri işleme ve performans optimizasyonları yapılarak sistem verimliliği artırıldı.",
       "Kullanıcı deneyimi (UX) göz önünde bulundurularak modern ve duyarlı bir arayüz geliştirildi.",
-      "Hata ayıklama (debugging) süreçleri titizlikle yürütüldü ve kod kararlılığı sağlandı.",
-      "Versiyon kontrol sistemleri (Git) ile sürdürülebilir geliştirme standartları uygulandı.",
-      "Güvenli kodlama pratikleri izlendi ve sistemin altyapısı güçlendirildi.",
-      "Geliştirilebilir ve ölçeklenebilir (scalable) bir sistem tasarımı oluşturuldu."
+      "Hata ayıklama (debugging) süreçleri titizlikle yürütüldü ve kod kararlılığı sağlandı."
     ];
 
     const generatedContent = `=================================================================\r
@@ -296,15 +640,8 @@ Kavramlar    : Çapraz Platform Geliştirme, Sistem Performans Takibi, UI/UX Tas
 --- TEKNİK PROJELER ---\r
 \r
 ${repos.map((repo, index) => {
-  // TÜRKÇE DOSTU İSİM DÜZELTİCİ (Tireleri boşluk yap, baş harfleri büyüt)
-  const formattedName = repo.name
-    .replace(/[-_]/g, ' ')
-    .split(' ')
-    .map((word: string) => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase())
-    .join(' ');
-    
+  const formattedName = repo.name.replace(/[-_]/g, ' ').split(' ').map((word: string) => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase()).join(' ');
   const techStack = repo.lang !== 'Çeşitli' && repo.lang !== null ? `${repo.lang}, Git/GitHub` : 'Çeşitli Teknolojiler, Git/GitHub';
-  
   return `🔹 Proje Adı: ${formattedName} ${repo.archived ? '(Arşivlenmiş)' : ''}\r
    Teknoloji: ${techStack}\r
    Detaylar : ${repo.desc}\r
@@ -317,7 +654,7 @@ ${repos.map((repo, index) => {
 • C dilinde yapılandırılmış karmaşık veri algoritmalarının entegrasyonu ve yönetimi.\r
 \r
 --- EĞİTİM ---\r
-🎓 ${cleanSchool}\r
+🎓 ${school || 'Üniversite ve Bölüm Bilgisi Girilmedi'}\r
 \r
 =================================================================\r
 NOT: Bu CV, ATS (Yapay Zeka Aday Takip Sistemleri) okuyucularından \r
@@ -333,16 +670,110 @@ maksimum puan almak üzere anahtar kelime optimizasyonuyla hazırlanmıştır.\r
       const savePath = await save({ 
         defaultPath: `${github || 'Profil'}_ATS_CV`, 
         filters: [
-          { name: 'Word Belgesi (PDF Yapılabilir)', extensions: ['doc'] },
-          { name: 'Markdown Metni', extensions: ['md'] },
-          { name: 'Düz Metin', extensions: ['txt'] }
+          { name: 'Web Sayfası / PDF Çıktısı (.html)', extensions: ['html'] },
+          { name: 'Markdown Metni (.md)', extensions: ['md'] },
+          { name: 'Düz Metin (.txt)', extensions: ['txt'] }
         ] 
       });
 
       if (savePath) {
-        await invoke('save_txt_file', { path: savePath, content: cvPreview });
-        alert('🚀 ATS Uyumlu CV Başarıyla Oluşturuldu ve Kaydedildi!');
+        let contentToSave = cvPreview;
+
+        // KUSURSUZ PDF DÖNÜŞÜMÜ İÇİN HTML TASARIMI
+        if (savePath.endsWith('.html')) {
+          const cleanLinkedin = linkedin ? linkedin.replace('https://', '').replace('www.', '') : 'linkedin.com/in/kullaniciadi';
+          const cleanWebsite = website ? website.replace('https://', '').replace('www.', '') : 'Web Siteniz Yok';
+          const achievementsList = [
+            "Temiz kod (Clean Code) prensipleri benimsendi ve modüler bir mimari kurgulandı.",
+            "Asenkron veri işleme ve performans optimizasyonları yapılarak sistem verimliliği artırıldı.",
+            "Kullanıcı deneyimi (UX) göz önünde bulundurularak modern ve duyarlı bir arayüz geliştirildi.",
+            "Hata ayıklama (debugging) süreçleri titizlikle yürütüldü ve kod kararlılığı sağlandı."
+          ];
+
+          contentToSave = `<!DOCTYPE html>
+<html lang="tr">
+<head>
+  <meta charset="UTF-8">
+  <title>${github || 'Kullanıcı'} - Özgeçmiş</title>
+  <style>
+    body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; line-height: 1.6; max-width: 800px; margin: 40px auto; color: #111; padding: 20px; }
+    h1 { text-align: center; font-size: 28px; margin-bottom: 5px; color: #000; text-transform: uppercase; }
+    .contact { text-align: center; font-size: 13px; color: #444; margin-bottom: 25px; border-bottom: 2px solid #333; padding-bottom: 20px; }
+    h2 { color: #2a52be; font-size: 16px; border-bottom: 1px solid #ccc; padding-bottom: 5px; margin-top: 25px; text-transform: uppercase; }
+    p { margin-bottom: 8px; font-size: 14px; }
+    ul { margin-top: 5px; margin-bottom: 15px; padding-left: 20px; }
+    li { font-size: 14px; margin-bottom: 4px; }
+    .project { margin-bottom: 15px; }
+    .project-header { display: flex; justify-content: space-between; align-items: baseline; }
+    .project-title { font-weight: bold; font-size: 15px; color: #111; }
+    .tech { font-size: 12px; color: #666; font-style: italic; }
+    @media print {
+      body { margin: 0; padding: 0; max-width: 100%; }
+      .no-print { display: none !important; }
+    }
+  </style>
+</head>
+<body>
+  <div class="no-print" style="background: #2a52be; color: white; padding: 12px; text-align: center; font-weight: bold; margin-bottom: 20px; border-radius: 6px; box-shadow: 0 4px 6px rgba(0,0,0,0.1);">
+    📄 PDF OLARAK KAYDETMEK İÇİN:<br>Klavyeden CTRL + P tuşlarına basın ve Hedef kısmından "PDF Olarak Kaydet" seçeneğini seçin.
+  </div>
+  
+  <h1>BİLAL HABEŞ ŞİMŞEK</h1>
+  <div class="contact">
+    E-posta: [Email Adresiniz] | Tel: [Telefon Numaranız] | Ankara, Türkiye<br>
+    github.com/${github || 'bilalhabessimsek'} | ${cleanLinkedin} | ${cleanWebsite}
+  </div>
+  
+  <h2>PROFESYONEL ÖZET</h2>
+  <p>Modern masaüstü teknolojileri (Tauri, React, TypeScript), sistem programlama (C) ve mobil uygulama geliştirme (Kotlin) alanlarında tutkulu Yazılım Geliştirici. Temiz mimari, donanım optimizasyonu ve kullanıcı odaklı UI/UX tasarımı konularında deneyimli. Sürekli öğrenmeye ve yerel yapay zeka entegrasyonlarına açık.</p>
+  
+  <h2>YETENEKLER VE DİLLER</h2>
+  <ul>
+    <li><strong>Teknolojiler:</strong> ${skills}</li>
+    <li><strong>Yabancı Dil:</strong> ${spokenLangs}</li>
+    <li><strong>Kavramlar:</strong> Çapraz Platform Geliştirme, Sistem Performans Takibi, UI/UX Tasarım, Asenkron Mimari</li>
+  </ul>
+  
+  <h2>TEKNİK PROJELER</h2>
+  ${repos.map((repo, index) => {
+    const formattedName = repo.name.replace(/[-_]/g, ' ').split(' ').map((w: string) => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase()).join(' ');
+    const techStack = repo.lang !== 'Çeşitli' && repo.lang !== null ? `${repo.lang}, Git/GitHub` : 'Çeşitli Teknolojiler, Git/GitHub';
+    return `
+    <div class="project">
+      <div class="project-header">
+        <span class="project-title">🔹 ${formattedName} ${repo.archived ? '(Arşivlenmiş)' : ''}</span>
+        <span class="tech">${techStack}</span>
+      </div>
+      <p style="margin-top: 4px; margin-bottom: 4px; color: #444;">${repo.desc}</p>
+      <ul>
+        <li>${achievementsList[index % achievementsList.length]}</li>
+      </ul>
+    </div>`;
+  }).join('')}
+  
+  <h2>DENEYİM & GELİŞİM</h2>
+  <ul>
+    <li>Çeşitli cross-platform uygulamalarının arayüz modernizasyonları ve performans iyileştirmeleri.</li>
+    <li>Android cihazlarda sistem kaynaklarını (FPS, RAM, Hafıza) arka planda asenkron olarak izleyen Overlay servisleri geliştirimi.</li>
+    <li>C dilinde yapılandırılmış karmaşık veri algoritmalarının entegrasyonu ve yönetimi.</li>
+  </ul>
+
+  <h2>EĞİTİM</h2>
+  <p>🎓 <strong>${school || 'Üniversite ve Bölüm Bilgisi Girilmedi'}</strong></p>
+</body>
+</html>`;
+        }
+
+        await invoke('save_txt_file', { path: savePath, content: contentToSave });
         setCvPreview(null);
+        
+        // EĞER HTML İNDİRDİYSE DOĞRUDAN TARAYICIDA AÇSIN (PDF İÇİN)
+        if (savePath.endsWith('.html')) {
+          alert('🚀 Dosya kaydedildi! Tarayıcınızda açılıyor...\n(PDF almak için tarayıcı açılınca CTRL+P yapıp "PDF Olarak Kaydet" diyebilirsiniz.)');
+          await invoke('open_in_ide', { path: savePath, ide: 'explorer' });
+        } else {
+          alert(`🚀 CV Başarıyla [${savePath.split('.').pop()}] Formatında Kaydedildi!`);
+        }
       }
     } catch (err) {
       console.error("CV Kaydetme Hatası:", err);
@@ -364,7 +795,7 @@ maksimum puan almak üzere anahtar kelime optimizasyonuyla hazırlanmıştır.\r
             </div>
             
             <div className="flex-1 overflow-hidden flex flex-col gap-2">
-              <p className="text-sm text-muted-foreground shrink-0">İndirmeden önce özgeçmişinde dilediğin gibi ekleme ve çıkarma yapabilirsin.</p>
+              <p className="text-sm text-muted-foreground shrink-0">İndirmeden önce özgeçmişinde dilediğin gibi ekleme ve çıkarma yapabilirsin. <b>"Web Sayfası / PDF"</b> seçeneği ile orijinal tasarım çıktısı alabilirsin.</p>
               <textarea
                 value={cvPreview}
                 onChange={e => setCvPreview(e.target.value)}
@@ -727,16 +1158,23 @@ maksimum puan almak üzere anahtar kelime optimizasyonuyla hazırlanmıştır.\r
 </file>
 
 <file path="src/components/NotesView.tsx">
-import { useState, useEffect, useRef } from 'react'
-import { Plus, Search, Cloud, Pin, Trash2, Tag, FileText, MonitorSmartphone } from 'lucide-react'
+import { useState, useEffect } from 'react'
+import { Plus, Search, Pin, Trash2, Tag, FileText, MonitorSmartphone, Download, Upload, Save, Check, Bold, Italic, Heading, ImageIcon } from 'lucide-react'
 import { invoke } from '@tauri-apps/api/core'
-import { open } from '@tauri-apps/plugin-dialog'
+import { convertFileSrc } from '@tauri-apps/api/core'
+import { open, save } from '@tauri-apps/plugin-dialog'
 import { cn } from '../lib/utils'
+
+// TipTap Editör Kütüphaneleri
+import { useEditor, EditorContent } from '@tiptap/react'
+import StarterKit from '@tiptap/starter-kit'
+import Image from '@tiptap/extension-image'
+import Placeholder from '@tiptap/extension-placeholder'
 
 type Note = {
   id: string
   title: string
-  content: string
+  content: string // Artık TipTap'in kusursuz HTML formatında saklanacak
   updatedAt: number
   tag: string
   pinned: boolean
@@ -747,11 +1185,7 @@ export function NotesView() {
   const [activeId, setActiveId] = useState<string | null>(null)
   const [searchQuery, setSearchQuery] = useState('')
   const [isSaving, setIsSaving] = useState(false)
-  
   const [rainmeterPath, setRainmeterPath] = useState<string | null>(null)
-  
-  // DİKKAT: Zamanlayıcı tipi any olarak düzeltildi
-  const rainmeterTimerRef = useRef<any>(null)
 
   useEffect(() => {
     const savedNotes = localStorage.getItem('ultimate_notes')
@@ -766,8 +1200,8 @@ export function NotesView() {
     } else {
       const welcomeNote: Note = {
         id: Date.now().toString(),
-        title: 'Ultimate Notlara Hoş Geldin!',
-        content: 'Burası senin kişisel alanın.',
+        title: 'İlk Notum 📌',
+        content: '<h2>Hoş Geldin!</h2><p>Buraya doğrudan yazabilir, <strong>kalın</strong> yapabilir veya araç çubuğundan resim ekleyebilirsin.</p><img src="https://images.unsplash.com/photo-1506744626753-dfbf0bf35d27?q=80&w=800&auto=format&fit=crop" />',
         updatedAt: Date.now(),
         tag: 'sistem',
         pinned: true
@@ -777,56 +1211,120 @@ export function NotesView() {
     }
   }, [])
 
-  useEffect(() => {
-    if (notes.length >= 0) {
-      setIsSaving(true)
-      localStorage.setItem('ultimate_notes', JSON.stringify(notes))
-      
-      if (rainmeterPath) {
-        if (rainmeterTimerRef.current) clearTimeout(rainmeterTimerRef.current)
-        
-        rainmeterTimerRef.current = setTimeout(() => {
-          const sortedForRainmeter = [...notes].sort((a,b) => {
-            if (a.pinned && !b.pinned) return -1
-            if (!a.pinned && b.pinned) return 1
-            return b.updatedAt - a.updatedAt
-          }).slice(0, 10)
-          
-          // Orijinal To-Do Formatı ve Windows Satır Başı
-          const content = sortedForRainmeter.length > 0 
-            ? sortedForRainmeter.map(n => `0|${n.title || 'İsimsiz Not'}`).join('\r\n') 
-            : '0|'
-          
-          invoke('save_txt_file', { path: rainmeterPath, content })
-            .catch(err => console.error('Rainmeter Senk. Hatası:', err))
-            
-        }, 1500)
-      }
-
-      const timer = setTimeout(() => setIsSaving(false), 500)
-      return () => clearTimeout(timer)
-    }
-  }, [notes, rainmeterPath])
-
   const activeNote = notes.find(n => n.id === activeId)
+
+  // TIPTAP EDİTÖR KURULUMU
+  const editor = useEditor({
+    extensions: [
+      StarterKit,
+      Image.configure({ inline: true, allowBase64: true }),
+      Placeholder.configure({ placeholder: 'Aklındakileri buraya dök, resimleri doğrudan ekle...' })
+    ],
+    content: activeNote?.content || '',
+    onUpdate: ({ editor }) => {
+      // Her harf yazıldığında state'i sessizce günceller
+      updateActiveNote('content', editor.getHTML())
+    },
+  })
+
+  // Aktif not değiştiğinde editörün içeriğini güvenle yeniler
+  useEffect(() => {
+    if (editor && activeNote && editor.getHTML() !== activeNote.content) {
+      editor.commands.setContent(activeNote.content)
+    }
+  }, [activeId, editor])
+
+  // Rainmeter Temizleyici (HTML'i güvenli metne çevirir)
+  const cleanForRainmeter = (htmlText: string) => {
+    if (!htmlText) return "▪ Boş not."
+    const tempDiv = document.createElement('div')
+    // Resimleri [Resim] tag'ine çevir
+    const processedHtml = htmlText.replace(/<img[^>]*>/gi, ' [Resim] ')
+    tempDiv.innerHTML = processedHtml
+    return tempDiv.innerText.trim() || "▪ Boş not."
+  }
+
+  const handleManualSave = async (latestNotes?: Note[]) => {
+    const notesToProcess = latestNotes || notes;
+    setIsSaving(true)
+    localStorage.setItem('ultimate_notes', JSON.stringify(notesToProcess))
+
+    if (rainmeterPath) {
+      const sortedForRainmeter = [...notesToProcess]
+        .filter(n => n.pinned)
+        .sort((a, b) => b.updatedAt - a.updatedAt)
+        .slice(0, 8)
+      
+      // KUSURSUZ TEMİZLİK: Sadece başlığı (title) alıyoruz, içerik/önizleme kısımlarını tamamen sildik!
+      const content = sortedForRainmeter.length > 0 
+        ? sortedForRainmeter.map(n => `▪ ${n.title || 'İsimsiz Not'}`).join('\r\n')
+        : '▪ Sabitlenmis notunuz bulunmuyor.'
+      
+      try {
+        await invoke('save_txt_file', { path: rainmeterPath, content })
+      } catch (err) {
+        console.error('Rainmeter Kayıt Hatası:', err)
+      }
+    }
+    setTimeout(() => setIsSaving(false), 1000)
+  }
+
+  // BİLGİSAYARDAN KUSURSUZ RESİM EKLEME
+  const handleInsertImage = async () => {
+    if (!editor) return
+    try {
+      const selected = await open({
+        multiple: false,
+        filters: [{ name: 'Resimler', extensions: ['png', 'jpg', 'jpeg', 'gif', 'webp'] }]
+      })
+      if (selected && typeof selected === 'string') {
+        const safeUrl = convertFileSrc(selected)
+        editor.chain().focus().setImage({ src: safeUrl }).run()
+      }
+    } catch (e) { console.error(e) }
+  }
+
+  const handleImportNote = async () => {
+    try {
+      const selectedPath = await open({ multiple: false, filters: [{ name: 'Metin Belgesi', extensions: ['txt', 'md', 'log'] }] })
+      if (selectedPath && typeof selectedPath === 'string') {
+        const fileContent = await invoke<number[]>('read_audio_file', { path: selectedPath })
+        const text = new TextDecoder('utf-8').decode(new Uint8Array(fileContent))
+        const fileName = selectedPath.split('\\').pop()?.split('/').pop()?.replace(/\.[^/.]+$/, "") || "İçe Aktarılan Not"
+
+        const htmlText = text.split('\n').map(line => `<p>${line}</p>`).join('')
+        const newNote: Note = { id: Date.now().toString(), title: fileName, content: htmlText, updatedAt: Date.now(), tag: 'içe_aktarıldı', pinned: false }
+        
+        const newNotesList = [newNote, ...notes]
+        setNotes(newNotesList)
+        setActiveId(newNote.id)
+        handleManualSave(newNotesList)
+      }
+    } catch (err) { alert("Dosya okunamadı: " + err) }
+  }
+
+  const handleExportNote = async () => {
+    if (!activeNote) return
+    try {
+      const savePath = await save({ defaultPath: `${activeNote.title || 'Not'}.txt`, filters: [{ name: 'Metin Belgesi', extensions: ['txt'] }] })
+      if (savePath) {
+        const plainText = cleanForRainmeter(activeNote.content)
+        await invoke('save_txt_file', { path: savePath, content: plainText })
+        alert("Not başarıyla kaydedildi!")
+      }
+    } catch (err) { alert("Kaydetme sırasında hata oluştu: " + err) }
+  }
 
   const setupRainmeter = async () => {
     try {
-      const path = await open({ 
-        multiple: false,
-        filters: [{ name: 'Metin Belgesi', extensions: ['txt'] }],
-        title: "Rainmeter eklentisinin 'tasks.txt' dosyasını seçin"
-      })
-      
+      const path = await open({ multiple: false, filters: [{ name: 'Metin Belgesi', extensions: ['txt'] }], title: "Rainmeter notes.txt dosyasını seçin" })
       if (path && typeof path === 'string') {
         setRainmeterPath(path)
         localStorage.setItem('rainmeter_path', path)
-        alert(`Bağlantı başarılı! 🚀\nNotlar şu dosyaya yazılacak:\n${path}\n\nNot: Eklentinin güncellenmesi için Rainmeter'a sağ tıklayıp 'Yenile' demeyi unutma!`)
-        setNotes([...notes]) 
+        alert(`Bağlantı Başarılı! 🚀`)
+        handleManualSave()
       }
-    } catch(e) {
-      console.error(e)
-    }
+    } catch(e) { console.error(e) }
   }
 
   const createNewNote = () => {
@@ -841,10 +1339,13 @@ export function NotesView() {
     const newNotes = notes.filter(n => n.id !== id)
     setNotes(newNotes)
     if (activeId === id) setActiveId(newNotes.length > 0 ? newNotes[0].id : null)
+    handleManualSave(newNotes)
   }
 
   const togglePin = (id: string) => {
-    setNotes(notes.map(n => n.id === id ? { ...n, pinned: !n.pinned, updatedAt: Date.now() } : n))
+    const newNotes = notes.map(n => n.id === id ? { ...n, pinned: !n.pinned, updatedAt: Date.now() } : n)
+    setNotes(newNotes)
+    handleManualSave(newNotes)
   }
 
   const updateActiveNote = (field: keyof Note, value: string) => {
@@ -854,7 +1355,6 @@ export function NotesView() {
 
   const filteredNotes = notes.filter(n => 
     n.title.toLowerCase().includes(searchQuery.toLowerCase()) || 
-    n.content.toLowerCase().includes(searchQuery.toLowerCase()) ||
     n.tag.toLowerCase().includes(searchQuery.toLowerCase())
   ).sort((a, b) => {
     if (a.pinned && !b.pinned) return -1
@@ -862,33 +1362,40 @@ export function NotesView() {
     return b.updatedAt - a.updatedAt
   })
 
-  const formatDate = (timestamp: number) => {
-    const date = new Date(timestamp)
-    const today = new Date()
-    if (date.toDateString() === today.toDateString()) return date.toLocaleTimeString('tr-TR', { hour: '2-digit', minute: '2-digit' })
-    return date.toLocaleDateString('tr-TR', { day: 'numeric', month: 'short' })
-  }
-
   return (
     <div className="flex h-full w-full flex-col md:flex-row">
+      {/* TIPTAP EDİTÖR STİLLERİ (Otomatik Güzelleştirici) */}
+      <style>{`
+        .ProseMirror { outline: none; min-height: 100%; padding-right: 1rem; }
+        .ProseMirror p.is-editor-empty:first-child::before {
+          content: attr(data-placeholder);
+          float: left;
+          color: hsl(var(--muted-foreground) / 0.5);
+          pointer-events: none;
+          height: 0;
+        }
+        .ProseMirror p { margin-bottom: 0.75rem; line-height: 1.6; }
+        .ProseMirror h2 { font-size: 1.8rem; font-weight: 900; margin-top: 1.5rem; margin-bottom: 0.75rem; color: hsl(var(--foreground)); }
+        .ProseMirror strong { font-weight: 800; color: hsl(var(--primary)); }
+        .ProseMirror em { font-style: italic; opacity: 0.9; }
+        .ProseMirror img { max-width: 100%; max-height: 450px; object-fit: contain; border-radius: 0.75rem; margin: 1rem 0; border: 1px solid hsl(var(--border)); box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1); }
+        .ProseMirror img.ProseMirror-selectednode { outline: 2px solid hsl(var(--primary)); }
+      `}</style>
+
+      {/* SOL PANEL (DEĞİŞMEDİ) */}
       <div className="flex w-full shrink-0 flex-col border-r border-border bg-sidebar md:w-[400px]">
         <div className="flex items-center justify-between px-5 pt-5">
           <h1 className="flex items-center gap-2 text-xl font-bold tracking-tight">
             <FileText className="h-6 w-6 text-primary" /> Notlarım
           </h1>
           <div className="flex gap-2">
-            <button 
-              onClick={setupRainmeter} 
-              className={cn("flex h-9 w-9 items-center justify-center rounded-lg transition-colors cursor-pointer", rainmeterPath ? "bg-green-500/10 text-green-500" : "bg-primary/10 text-primary hover:bg-primary hover:text-primary-foreground")}
-              title="Rainmeter'a Bağla (tasks.txt seç)"
-            >
+            <button onClick={setupRainmeter} className={cn("flex h-9 w-9 items-center justify-center rounded-lg transition-colors cursor-pointer", rainmeterPath ? "bg-green-500/10 text-green-500" : "bg-primary/10 text-primary hover:bg-primary hover:text-primary-foreground")} title="Kendi Widget'ımıza Bağla">
               <MonitorSmartphone className="h-5 w-5" />
             </button>
-            <button 
-              onClick={createNewNote} 
-              className="flex h-9 w-9 items-center justify-center rounded-lg bg-primary/10 text-primary hover:bg-primary hover:text-primary-foreground transition-colors cursor-pointer"
-              title="Yeni Not Oluştur"
-            >
+            <button onClick={handleImportNote} className="flex h-9 w-9 items-center justify-center rounded-lg bg-secondary text-foreground hover:bg-primary hover:text-primary-foreground transition-colors cursor-pointer" title="Txt İçe Aktar">
+              <Upload className="h-4 w-4" />
+            </button>
+            <button onClick={createNewNote} className="flex h-9 w-9 items-center justify-center rounded-lg bg-primary/10 text-primary hover:bg-primary hover:text-primary-foreground transition-colors cursor-pointer" title="Yeni Not Oluştur">
               <Plus className="h-5 w-5" />
             </button>
           </div>
@@ -906,24 +1413,19 @@ export function NotesView() {
             <div className="text-center mt-10"><p className="text-sm text-muted-foreground">Aradığınız not bulunamadı.</p></div>
           ) : (
             filteredNotes.map((note) => (
-              <div 
-                key={note.id}
-                onClick={() => setActiveId(note.id)}
-                className={cn('group mb-1 flex flex-col w-full rounded-xl px-4 py-3 text-left transition-colors cursor-pointer border', activeId === note.id ? 'bg-accent border-border shadow-sm' : 'bg-sidebar border-transparent hover:bg-accent/40')}
-              >
+              <div key={note.id} onClick={() => setActiveId(note.id)} className={cn('group mb-1 flex flex-col w-full rounded-xl px-4 py-3 text-left transition-colors cursor-pointer border', activeId === note.id ? 'bg-accent border-border shadow-sm' : 'bg-sidebar border-transparent hover:bg-accent/40')}>
                 <div className="flex items-start justify-between gap-2 mb-1">
                   <span className={cn("flex items-center gap-1.5 truncate text-[15px] font-bold", activeId === note.id ? "text-primary" : "text-foreground")}>
                     {note.pinned && <Pin className="h-3.5 w-3.5 text-primary shrink-0" fill="currentColor" />}
                     {note.title || "İsimsiz Not"}
                   </span>
-                  <span className="text-[11px] font-medium text-muted-foreground whitespace-nowrap pt-0.5">{formatDate(note.updatedAt)}</span>
                 </div>
-                <p className="line-clamp-2 text-[13px] leading-relaxed text-muted-foreground/80 mb-2 min-h-[38px]">{note.content || "Boş not..."}</p>
+                {/* Arayüzde sadece temiz metnin bir kısmını göster */}
+                <p className="line-clamp-2 text-[13px] leading-relaxed text-muted-foreground/80 mb-2 min-h-[38px]">{cleanForRainmeter(note.content).substring(0, 80)}...</p>
                 <div className="flex items-center justify-between mt-auto">
                   <span className="inline-flex items-center gap-1 text-[10px] font-mono font-medium text-muted-foreground bg-background px-2 py-0.5 rounded-md border border-border">
                     <Tag className="h-3 w-3" /> {note.tag}
                   </span>
-                  
                   <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
                     <button onClick={(e) => { e.stopPropagation(); togglePin(note.id); }} className="p-1.5 text-muted-foreground hover:text-primary transition-colors rounded-md" title={note.pinned ? "Sabitlemeyi Kaldır" : "Sabitle"}><Pin className="h-3.5 w-3.5" /></button>
                     <button onClick={(e) => { e.stopPropagation(); deleteNote(note.id); }} className="p-1.5 text-muted-foreground hover:text-red-500 transition-colors rounded-md" title="Sil"><Trash2 className="h-3.5 w-3.5" /></button>
@@ -935,6 +1437,7 @@ export function NotesView() {
         </div>
       </div>
 
+      {/* SAĞ PANEL (TIPTAP CANLI EDİTÖR) */}
       <div className="flex flex-1 flex-col bg-background relative">
         {activeNote ? (
           <>
@@ -944,20 +1447,66 @@ export function NotesView() {
                   <Tag className="h-4 w-4 text-muted-foreground" />
                   <input type="text" value={activeNote.tag} onChange={(e) => updateActiveNote('tag', e.target.value)} className="bg-transparent text-xs font-mono text-foreground focus:outline-none w-24" placeholder="Etiket..." />
                 </div>
-                <span className="text-xs text-muted-foreground font-medium">Son düzenleme: {new Date(activeNote.updatedAt).toLocaleTimeString('tr-TR', { hour: '2-digit', minute: '2-digit' })}</span>
               </div>
               
               <div className="flex items-center gap-3">
-                <span className={cn("inline-flex items-center gap-1.5 text-xs font-bold px-3 py-1.5 rounded-full transition-colors", isSaving ? "text-amber-500 bg-amber-500/10" : "text-green-500 bg-green-500/10")}>
-                  {isSaving ? <Cloud className="h-3.5 w-3.5 animate-pulse" /> : <Cloud className="h-3.5 w-3.5" />}
-                  {isSaving ? 'Kaydediliyor...' : 'Kaydedildi'}
-                </span>
+                <button onClick={handleExportNote} className="flex items-center gap-2 bg-secondary hover:bg-secondary/80 text-foreground px-4 py-2 rounded-xl transition-colors text-xs font-bold cursor-pointer" title="Notu İndir">
+                  <Download className="h-4 w-4" /> Dışa Aktar
+                </button>
+                
+                <button onClick={() => handleManualSave()} className={cn("flex items-center gap-2 px-5 py-2 rounded-xl transition-all cursor-pointer shadow-sm font-bold text-sm", isSaving ? "bg-green-500 text-white scale-95" : "bg-primary text-primary-foreground hover:bg-primary/90 hover:scale-105 active:scale-95")} title="Rainmeter'a ve sisteme kaydet (Ctrl + S)">
+                  {isSaving ? <Check className="h-4 w-4" /> : <Save className="h-4 w-4" />}
+                  {isSaving ? 'Kaydedildi!' : 'Kaydet'}
+                </button>
               </div>
             </header>
             
-            <div className="flex-1 overflow-y-auto p-8 md:p-12 flex flex-col gap-6">
-              <input type="text" value={activeNote.title} onChange={(e) => updateActiveNote('title', e.target.value)} placeholder="Not Başlığı..." className="w-full bg-transparent text-4xl font-black tracking-tight text-foreground focus:outline-none placeholder:text-muted-foreground/50" />
-              <textarea value={activeNote.content} onChange={(e) => updateActiveNote('content', e.target.value)} placeholder="Aklındakileri buraya dök..." className="w-full flex-1 resize-none bg-transparent text-[16px] leading-relaxed text-foreground/90 focus:outline-none placeholder:text-muted-foreground/50 scrollbar-hide" />
+            <div className="flex-1 flex flex-col p-8 md:p-12 overflow-hidden">
+              <input 
+                type="text" 
+                value={activeNote.title} 
+                onChange={(e) => updateActiveNote('title', e.target.value)} 
+                placeholder="Not Başlığı (Win + Nokta ile Emoji 🚀)..." 
+                className="w-full bg-transparent text-4xl font-black tracking-tight text-foreground focus:outline-none placeholder:text-muted-foreground/50 mb-6 shrink-0" 
+              />
+              
+              {/* TIPTAP ARAÇ ÇUBUĞU */}
+              {editor && (
+                <div className="flex items-center gap-1 mb-4 bg-sidebar p-1.5 rounded-xl border border-border w-max shrink-0">
+                  <button 
+                    onClick={() => editor.chain().focus().toggleBold().run()} 
+                    className={cn("p-2 rounded-lg transition-colors cursor-pointer", editor.isActive('bold') ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:bg-accent hover:text-foreground")} 
+                    title="Kalın (Bold)"
+                  >
+                    <Bold className="h-4 w-4" />
+                  </button>
+                  <button 
+                    onClick={() => editor.chain().focus().toggleItalic().run()} 
+                    className={cn("p-2 rounded-lg transition-colors cursor-pointer", editor.isActive('italic') ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:bg-accent hover:text-foreground")} 
+                    title="İtalik"
+                  >
+                    <Italic className="h-4 w-4" />
+                  </button>
+                  <button 
+                    onClick={() => editor.chain().focus().toggleHeading({ level: 2 }).run()} 
+                    className={cn("p-2 rounded-lg transition-colors cursor-pointer", editor.isActive('heading', { level: 2 }) ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:bg-accent hover:text-foreground")} 
+                    title="Başlık"
+                  >
+                    <Heading className="h-4 w-4" />
+                  </button>
+                  
+                  <div className="w-px h-5 bg-border mx-2"></div>
+                  
+                  <button onClick={handleInsertImage} className="p-2 hover:bg-accent rounded-lg text-muted-foreground hover:text-foreground transition-colors cursor-pointer" title="Bilgisayardan Resim Ekle">
+                    <ImageIcon className="h-4 w-4" />
+                  </button>
+                </div>
+              )}
+
+              {/* TIPTAP EDİTÖR EKRANI */}
+              <div className="w-full flex-1 overflow-y-auto scrollbar-hide text-[16px]">
+                <EditorContent editor={editor} />
+              </div>
             </div>
           </>
         ) : (
@@ -975,7 +1524,7 @@ export function NotesView() {
 
 <file path="src/components/PlayerView.tsx">
 import { useState, useRef, useEffect } from 'react'
-import { Play, Pause, SkipBack, SkipForward, Music2, Search, ListMusic, FolderPlus, Shuffle, Heart, Download, Plus, Trash2, ChevronLeft, Check, ArrowDown, ArrowUp, ListVideo } from 'lucide-react'
+import { Play, Pause, SkipBack, SkipForward, Music2, Search, ListMusic, FolderPlus, Shuffle, Heart, Download, Plus, Trash2, ChevronLeft, ArrowDown, ArrowUp, ListVideo, ListPlus, Volume2, VolumeX, Pin, Repeat, Repeat1 } from 'lucide-react'
 import { invoke } from '@tauri-apps/api/core'
 import { open, save } from '@tauri-apps/plugin-dialog'
 import { cn } from '../lib/utils'
@@ -988,6 +1537,13 @@ type Track = {
   format: string
   path: string
   modified_at: number
+}
+
+// Akıllı Kuyruk Sistemi için
+type QueueItem = {
+  qid: number
+  track: Track
+  pinned: boolean
 }
 
 const getMimeType = (format: string) => {
@@ -1007,46 +1563,87 @@ const getMimeType = (format: string) => {
 export function PlayerView() {
   const [tracks, setTracks] = useState<Track[]>([])
   const [searchQuery, setSearchQuery] = useState('')
+  const [queueSearchQuery, setQueueSearchQuery] = useState('')
   const [activeTrack, setActiveTrack] = useState<Track | null>(null)
   const [isLoading, setIsLoading] = useState(false)
   const [isPlaying, setIsPlaying] = useState(false)
-  const [isShuffle, setIsShuffle] = useState(false)
   
+  // Döngü ve Karıştırma
+  const [isShuffle, setIsShuffle] = useState(false)
+  const [loopMode, setLoopMode] = useState<'none' | 'all' | 'one'>('none')
+  
+  const [currentTime, setCurrentTime] = useState(0)
+  const [duration, setDuration] = useState(0)
+  const [volume, setVolume] = useState(1)
+  
+  // Tam Teşekküllü Kuyruk Sistemi
+  const [queue, setQueue] = useState<QueueItem[]>([])
+
   const [favorites, setFavorites] = useState<string[]>([])
   const [playlists, setPlaylists] = useState<Record<string, string[]>>({})
   const [playCounts, setPlayCounts] = useState<Record<string, number>>({})
   
   const [activeTab, setActiveTab] = useState<'Tümü' | 'Favoriler'>('Tümü')
-  
-  const [rightPanelMode, setRightPanelMode] = useState<'player' | 'dash' | 'playlist_detail'>('player')
+  const [rightPanelMode, setRightPanelMode] = useState<'player' | 'dash' | 'playlist_detail' | 'playlist_add'>('player')
   const [currentPlaylist, setCurrentPlaylist] = useState<string | null>(null)
   const [newListName, setNewListName] = useState('')
 
   const [dragOverList, setDragOverList] = useState<string | null>(null)
   const [isDragOverDetail, setIsDragOverDetail] = useState(false)
 
-  const [sortType, setSortType] = useState<'title' | 'plays' | 'date'>('title')
-  const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('asc')
+  // Sıralama Hafızası
+  const [sortType, setSortType] = useState<'title' | 'plays' | 'date'>((localStorage.getItem('music_sort_type') as any) || 'title')
+  const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>((localStorage.getItem('music_sort_dir') as any) || 'asc')
   const [isSortOpen, setIsSortOpen] = useState(false)
   
   const audioRef = useRef<HTMLAudioElement | null>(null)
   const synthsRef = useRef<Tone.PolySynth[]>([])
   const [isMidi, setIsMidi] = useState(false)
+  
+  const currentQueueRef = useRef<Track[]>([]) 
   const playNextRef = useRef<() => void>(() => {})
-  const currentQueueRef = useRef<Track[]>([])
+  const playPrevRef = useRef<() => void>(() => {})
+  const togglePlayRef = useRef<() => void>(() => {})
 
-  useEffect(() => { playNextRef.current = playNext })
+  // Fonksiyon referanslarını güncel tut (Klavye tuşları için)
+  useEffect(() => { 
+    playNextRef.current = playNext 
+    playPrevRef.current = playPrev
+    togglePlayRef.current = togglePlay
+  })
+
+  // Kulaklık & Medya Tuşları Entegrasyonu
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return;
+      if (e.code === 'Space' || e.key === 'MediaPlayPause') { e.preventDefault(); togglePlayRef.current(); }
+      if (e.key === 'MediaTrackNext') { e.preventDefault(); playNextRef.current(); }
+      if (e.key === 'MediaTrackPrevious') { e.preventDefault(); playPrevRef.current(); }
+    }
+
+    window.addEventListener('keydown', handleKeyDown)
+
+    if ('mediaSession' in navigator) {
+      navigator.mediaSession.setActionHandler('play', () => togglePlayRef.current());
+      navigator.mediaSession.setActionHandler('pause', () => togglePlayRef.current());
+      navigator.mediaSession.setActionHandler('previoustrack', () => playPrevRef.current());
+      navigator.mediaSession.setActionHandler('nexttrack', () => playNextRef.current());
+    }
+
+    return () => window.removeEventListener('keydown', handleKeyDown)
+  }, [])
 
   useEffect(() => {
     audioRef.current = new Audio()
     audioRef.current.onended = () => { if (playNextRef.current) playNextRef.current() }
     
+    audioRef.current.ontimeupdate = () => setCurrentTime(audioRef.current?.currentTime || 0)
+    audioRef.current.onloadedmetadata = () => setDuration(audioRef.current?.duration || 0)
+
     const savedFavs = localStorage.getItem('music_favs')
     if (savedFavs) setFavorites(JSON.parse(savedFavs))
-
     const savedPlaylists = localStorage.getItem('music_playlists')
     if (savedPlaylists) setPlaylists(JSON.parse(savedPlaylists))
-
     const savedCounts = localStorage.getItem('music_playcounts')
     if (savedCounts) setPlayCounts(JSON.parse(savedCounts))
 
@@ -1081,17 +1678,30 @@ export function PlayerView() {
     }
   }
 
-  const playTrack = async (track: Track, queueContext?: Track[]) => {
+  const playTrack = async (track: Track, queueContext?: Track[], preserveQueue: boolean = false) => {
     setActiveTrack(track)
     setIsPlaying(false)
     stopCurrentTrack()
     
-    if (queueContext) currentQueueRef.current = queueContext
-    else if (currentQueueRef.current.length === 0) currentQueueRef.current = displayedTracks
+    const activeQueue = queueContext || currentQueueRef.current || displayedTracks
+    currentQueueRef.current = activeQueue
+
+    if (!preserveQueue) {
+      const idx = activeQueue.findIndex(t => t.id === track.id)
+      if (idx !== -1) {
+        setQueue(activeQueue.slice(idx + 1).map((t, i) => ({ qid: Date.now() + i, track: t, pinned: false })))
+      } else {
+        setQueue([])
+      }
+    }
 
     const newCounts = { ...playCounts, [track.id]: (playCounts[track.id] || 0) + 1 }
     setPlayCounts(newCounts)
     localStorage.setItem('music_playcounts', JSON.stringify(newCounts))
+
+    if ('mediaSession' in navigator) {
+      navigator.mediaSession.metadata = new MediaMetadata({ title: track.title, artist: 'Ultimate Oynatıcı' })
+    }
 
     try {
       const bytes = await invoke<number[]>('read_audio_file', { path: track.path })
@@ -1125,6 +1735,7 @@ export function PlayerView() {
         const url = URL.createObjectURL(blob)
         if (audioRef.current) {
           audioRef.current.src = url
+          audioRef.current.volume = volume
           audioRef.current.play()
           setIsPlaying(true)
         }
@@ -1146,24 +1757,91 @@ export function PlayerView() {
     }
   }
 
+  const toggleLoop = () => {
+    if (loopMode === 'none') setLoopMode('all')
+    else if (loopMode === 'all') setLoopMode('one')
+    else setLoopMode('none')
+  }
+
   const playNext = () => {
-    const queue = currentQueueRef.current.length > 0 ? currentQueueRef.current : tracks
-    if (queue.length === 0) return
-    let nextIndex;
-    if (isShuffle) nextIndex = Math.floor(Math.random() * queue.length)
-    else {
-      const currentIndex = queue.findIndex(t => t.id === activeTrack?.id)
-      nextIndex = (currentIndex + 1) % queue.length
+    if (loopMode === 'one' && audioRef.current && activeTrack) {
+      audioRef.current.currentTime = 0;
+      audioRef.current.play();
+      setIsPlaying(true);
+      return;
     }
-    playTrack(queue[nextIndex])
+
+    if (queue.length > 0) {
+      let nextItemIdx = 0;
+      if (isShuffle) {
+        nextItemIdx = Math.floor(Math.random() * queue.length);
+      }
+      const nextTrack = queue[nextItemIdx].track;
+      setQueue(prev => prev.filter((_, i) => i !== nextItemIdx));
+      playTrack(nextTrack, currentQueueRef.current, true);
+    } else {
+      const baseList = currentQueueRef.current.length > 0 ? currentQueueRef.current : tracks;
+      if (baseList.length === 0) return;
+
+      if (isShuffle) {
+        playTrack(baseList[Math.floor(Math.random() * baseList.length)], baseList, true);
+      } else {
+        const currentIndex = baseList.findIndex(t => t.id === activeTrack?.id);
+        const isLast = currentIndex === baseList.length - 1;
+        
+        if (isLast && loopMode === 'none') {
+          stopCurrentTrack();
+          setIsPlaying(false);
+          return;
+        }
+        
+        const nextIndex = isLast ? 0 : currentIndex + 1;
+        playTrack(baseList[nextIndex], baseList, true);
+      }
+    }
   }
 
   const playPrev = () => {
-    const queue = currentQueueRef.current.length > 0 ? currentQueueRef.current : tracks
-    if (queue.length === 0) return
-    const currentIndex = queue.findIndex(t => t.id === activeTrack?.id)
-    const prevIndex = currentIndex <= 0 ? queue.length - 1 : currentIndex - 1
-    playTrack(queue[prevIndex])
+    const baseList = currentQueueRef.current.length > 0 ? currentQueueRef.current : tracks;
+    if (baseList.length === 0) return;
+    
+    const currentIndex = baseList.findIndex(t => t.id === activeTrack?.id);
+    const prevIndex = currentIndex <= 0 ? baseList.length - 1 : currentIndex - 1;
+    playTrack(baseList[prevIndex], baseList, true); 
+  }
+
+  const addToQueue = (e: React.MouseEvent, track: Track) => {
+    e.stopPropagation()
+    if (!activeTrack) {
+      playTrack(track, displayedTracks)
+    } else {
+      const newItem: QueueItem = { qid: Date.now(), track, pinned: false }
+      setQueue(prev => [...prev, newItem])
+    }
+  }
+
+  const moveQueueItem = (idx: number, dir: -1 | 1) => {
+    const newIdx = idx + dir;
+    if (newIdx < 0 || newIdx >= queue.length) return;
+    const newQueue = [...queue];
+    const temp = newQueue[idx];
+    newQueue[idx] = newQueue[newIdx];
+    newQueue[newIdx] = temp;
+    setQueue(newQueue);
+  }
+
+  const toggleQueuePin = (qid: number) => {
+    setQueue(prev => {
+      const updated = prev.map(item => item.qid === qid ? { ...item, pinned: !item.pinned } : item)
+      return updated.sort((a, b) => {
+        if (a.pinned === b.pinned) return 0
+        return a.pinned ? -1 : 1
+      })
+    })
+  }
+
+  const removeFromQueue = (qid: number) => {
+    setQueue(prev => prev.filter(item => item.qid !== qid))
   }
 
   const toggleFavorite = (e: React.MouseEvent, id: string) => {
@@ -1171,6 +1849,37 @@ export function PlayerView() {
     const newFavs = favorites.includes(id) ? favorites.filter(fav => fav !== id) : [...favorites, id]
     setFavorites(newFavs)
     localStorage.setItem('music_favs', JSON.stringify(newFavs))
+  }
+
+  const handleSeek = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const time = Number(e.target.value)
+    if (audioRef.current) audioRef.current.currentTime = time
+    setCurrentTime(time)
+  }
+
+  const handleVolume = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const vol = Number(e.target.value)
+    if (audioRef.current) audioRef.current.volume = vol
+    setVolume(vol)
+  }
+
+  const formatTime = (time: number) => {
+    if (isNaN(time)) return "0:00"
+    const m = Math.floor(time / 60)
+    const s = Math.floor(time % 60)
+    return `${m}:${s < 10 ? '0' : ''}${s}`
+  }
+
+  const handleSortChange = (type: 'title' | 'plays' | 'date') => {
+    setSortType(type)
+    localStorage.setItem('music_sort_type', type)
+    setIsSortOpen(false)
+  }
+
+  const handleSortDirChange = () => {
+    const newDir = sortDirection === 'asc' ? 'desc' : 'asc'
+    setSortDirection(newDir)
+    localStorage.setItem('music_sort_dir', newDir)
   }
 
   const createPlaylist = (e: React.FormEvent) => {
@@ -1193,11 +1902,10 @@ export function PlayerView() {
     if (currentPlaylist === name) { setRightPanelMode('dash'); setCurrentPlaylist(null) }
   }
 
-  const handleDropOnPlaylist = (e: React.DragEvent, listName: string) => {
-    e.preventDefault()
-    const trackId = e.dataTransfer.getData('trackId')
+  const handleDropOnPlaylist = (e: React.DragEvent | any, listName: string) => {
+    if(e.preventDefault) e.preventDefault()
+    const trackId = e.dataTransfer ? e.dataTransfer.getData('trackId') : e.trackId
     if (!trackId) return
-    
     const currentList = playlists[listName] || []
     if (!currentList.includes(trackId)) {
       const newPlaylists = { ...playlists, [listName]: [...currentList, trackId] }
@@ -1206,20 +1914,18 @@ export function PlayerView() {
     }
   }
 
-  const removeTrackFromPlaylist = (e: React.MouseEvent, trackId: string, listName: string) => {
-    e.stopPropagation()
+  const removeTrackFromPlaylist = (e: React.MouseEvent | any, trackId: string, listName: string) => {
+    if(e.stopPropagation) e.stopPropagation()
     const currentList = playlists[listName] || []
     const newPlaylists = { ...playlists, [listName]: currentList.filter(id => id !== trackId) }
     setPlaylists(newPlaylists)
     localStorage.setItem('music_playlists', JSON.stringify(newPlaylists))
   }
 
-  // --- KUSURSUZ TXT ÇIKARMA FONKSİYONLARI ---
   const downloadTxt = async (filename: string, content: string) => {
     try {
       const savePath = await save({ defaultPath: filename, filters: [{ name: 'Metin Belgesi', extensions: ['txt'] }] });
       if (savePath) {
-        // Doğrudan Rust motorumuzu kullanarak dosya yetki engelini aşıyoruz
         await invoke('save_txt_file', { path: savePath, content: content });
         alert('✅ Dosya başarıyla oluşturuldu ve bilgisayarına kaydedildi!');
       }
@@ -1232,13 +1938,11 @@ export function PlayerView() {
   const exportAllTracks = async () => {
     const sorted = [...tracks].sort((a,b) => a.title.localeCompare(b.title))
     let content = `TÜM MÜZİK ARŞİVİ\nOluşturulma Tarihi: ${new Date().toLocaleString('tr-TR')}\n-----------------------------------\n\n`
-    
     if (sorted.length === 0) {
       content += "Arşivinizde henüz hiç şarkı bulunmuyor."
     } else {
       content += `Toplam Şarkı: ${sorted.length}\n\n` + sorted.map((t, i) => `${i + 1}. ${t.title} [${t.format}]`).join('\n')
     }
-    
     await downloadTxt('Tum_Muzik_Arsivim.txt', content)
   }
 
@@ -1246,15 +1950,12 @@ export function PlayerView() {
     e.stopPropagation()
     const listTrackIds = playlists[name] || []
     const listTracks = tracks.filter(t => listTrackIds.includes(t.id)).sort((a,b) => a.title.localeCompare(b.title))
-    
     let content = `ÇALMA LİSTESİ: ${name.toUpperCase()}\nOluşturulma Tarihi: ${new Date().toLocaleString('tr-TR')}\n-----------------------------------\n\n`
-    
     if (listTracks.length === 0) {
       content += "Bu çalma listesi şu an boş."
     } else {
       content += `Toplam Şarkı: ${listTracks.length}\n\n` + listTracks.map((t, i) => `${i + 1}. ${t.title} [${t.format}]`).join('\n')
     }
-    
     await downloadTxt(`Liste_${name.replace(/\s+/g, '_')}.txt`, content)
   }
 
@@ -1269,19 +1970,22 @@ export function PlayerView() {
   })
 
   const currentPlaylistTracks = currentPlaylist ? tracks.filter(t => playlists[currentPlaylist]?.includes(t.id)) : []
+  let filteredQueueSearch = [...tracks]
+  if (queueSearchQuery) filteredQueueSearch = filteredQueueSearch.filter(t => t.title.toLowerCase().includes(queueSearchQuery.toLowerCase()))
 
   return (
     <div className="flex h-full w-full flex-col md:flex-row relative">
       {isSortOpen && <div className="absolute inset-0 z-40" onClick={() => setIsSortOpen(false)}></div>}
 
-      <div className="flex w-full shrink-0 flex-col border-r border-border bg-sidebar md:w-[450px] z-10">
+      {/* SOL PANEL (KÜTÜPHANE) */}
+      <div className="flex w-full shrink-0 flex-col border-r border-border bg-sidebar md:w-[520px] z-10">
         <div className="flex items-center justify-between px-5 pt-5 pb-2">
           <h1 className="flex items-center gap-2 text-xl font-bold tracking-tight">
             <ListMusic className="h-6 w-6 text-primary" /> Kütüphane
           </h1>
           <div className="flex gap-2">
             <button 
-              onClick={() => { setRightPanelMode(prev => prev === 'dash' || prev === 'playlist_detail' ? 'player' : 'dash'); setCurrentPlaylist(null); }} 
+              onClick={() => { setRightPanelMode(prev => prev === 'dash' || prev === 'playlist_detail' || prev === 'playlist_add' ? 'player' : 'dash'); setCurrentPlaylist(null); }} 
               className={cn("flex items-center gap-2 px-3 py-1.5 rounded-lg text-sm font-medium transition-colors", rightPanelMode !== 'player' ? "bg-primary text-primary-foreground shadow-sm" : "bg-primary/10 text-primary hover:bg-primary hover:text-primary-foreground")}
             >
               <ListVideo className="h-4 w-4" /> {rightPanelMode !== 'player' ? "Oynatıcıya Dön" : "Listelerim"}
@@ -1307,24 +2011,21 @@ export function PlayerView() {
           </div>
           
           <div className="relative shrink-0 flex items-center h-[46px]">
-            <div className="flex items-center rounded-xl border border-border bg-background h-full transition-colors">
-              <button onClick={() => setIsSortOpen(!isSortOpen)} className="flex items-center gap-1.5 h-full px-3 text-sm font-medium text-foreground hover:bg-accent/50 rounded-l-xl transition-colors">
-                {sortType === 'title' ? 'İsim' : sortType === 'plays' ? 'Dinlenme' : 'Tarih'}
-                <ArrowDown className={cn("h-3 w-3 transition-transform duration-300", isSortOpen && "rotate-180")} />
-              </button>
-              <div className="w-[1px] h-6 bg-border"></div>
-              <button onClick={() => setSortDirection(prev => prev === 'asc' ? 'desc' : 'asc')} className="h-full px-3 text-muted-foreground hover:text-primary hover:bg-accent/50 rounded-r-xl transition-colors" title="Yönü Değiştir">
-                {sortDirection === 'desc' ? <ArrowDown className="h-4 w-4" /> : <ArrowUp className="h-4 w-4" />}
-              </button>
-
-              <div className={cn("absolute top-[52px] right-0 w-32 bg-sidebar border border-border rounded-xl shadow-xl overflow-hidden transition-all duration-200 origin-top", isSortOpen ? "scale-y-100 opacity-100" : "scale-y-0 opacity-0 pointer-events-none")}>
-                <div className="flex flex-col py-1">
-                  <button onClick={() => { setSortType('title'); setIsSortOpen(false); }} className={cn("px-4 py-2 text-left text-sm hover:bg-accent transition-colors", sortType === 'title' && "text-primary font-medium")}>İsim</button>
-                  <button onClick={() => { setSortType('plays'); setIsSortOpen(false); }} className={cn("px-4 py-2 text-left text-sm hover:bg-accent transition-colors", sortType === 'plays' && "text-primary font-medium")}>Dinlenme</button>
-                  <button onClick={() => { setSortType('date'); setIsSortOpen(false); }} className={cn("px-4 py-2 text-left text-sm hover:bg-accent transition-colors", sortType === 'date' && "text-primary font-medium")}>Tarih</button>
-                </div>
-              </div>
+            <div className="flex items-center rounded-xl border border-border bg-background h-full transition-colors overflow-hidden px-2 relative w-32">
+              <select 
+                value={sortType} 
+                onChange={(e) => handleSortChange(e.target.value as any)}
+                className="w-full bg-transparent text-sm font-medium text-foreground outline-none appearance-none cursor-pointer z-10 pl-2"
+              >
+                <option value="title" className="bg-sidebar text-foreground">İsim</option>
+                <option value="plays" className="bg-sidebar text-foreground">Dinlenme</option>
+                <option value="date" className="bg-sidebar text-foreground">Tarih</option>
+              </select>
+              <ArrowDown className="h-3 w-3 absolute right-3 pointer-events-none text-muted-foreground z-0" />
             </div>
+            <button onClick={handleSortDirChange} className="h-full px-3 text-muted-foreground hover:text-primary transition-colors bg-background border border-border border-l-0 rounded-r-xl ml-[-1px]" title="Yönü Değiştir">
+              {sortDirection === 'desc' ? <ArrowDown className="h-4 w-4" /> : <ArrowUp className="h-4 w-4" />}
+            </button>
           </div>
         </div>
 
@@ -1339,19 +2040,24 @@ export function PlayerView() {
                 key={track.id} 
                 draggable
                 onDragStart={(e) => { e.dataTransfer.setData('trackId', track.id) }}
-                className={cn('group mb-1 flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left transition-colors relative overflow-hidden cursor-grab active:cursor-grabbing', activeTrack?.id === track.id ? 'bg-accent' : 'hover:bg-accent/40')}
+                onClick={() => playTrack(track, displayedTracks)}
+                className={cn('group mb-1 flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left transition-colors relative overflow-hidden cursor-pointer', activeTrack?.id === track.id ? 'bg-accent' : 'hover:bg-accent/40')}
               >
-                <div className={cn('flex h-10 w-10 shrink-0 items-center justify-center rounded-lg shadow-sm z-10 pointer-events-none', activeTrack?.id === track.id ? 'bg-primary/20 text-primary' : 'bg-background border border-border text-muted-foreground')}>
-                  {activeTrack?.id === track.id && isPlaying ? (
-                    <div className="flex gap-0.5 h-3 items-end">
-                      <div className="w-0.5 bg-primary h-full animate-[bounce_1s_infinite]"></div>
-                      <div className="w-0.5 bg-primary h-2/3 animate-[bounce_1.2s_infinite]"></div>
-                      <div className="w-0.5 bg-primary h-1/2 animate-[bounce_0.8s_infinite]"></div>
-                    </div>
-                  ) : <Music2 className="h-4 w-4" />}
+                <div className={cn('relative flex h-10 w-10 shrink-0 items-center justify-center rounded-lg shadow-sm overflow-hidden transition-colors', activeTrack?.id === track.id ? 'bg-primary text-primary-foreground' : 'bg-background border border-border text-muted-foreground group-hover:bg-primary/20 group-hover:text-primary group-hover:border-primary/50')}>
+                  {activeTrack?.id === track.id ? (
+                    isPlaying ? (
+                      <div className="flex gap-0.5 h-3 items-end">
+                        <div className="w-0.5 bg-primary-foreground h-full animate-[bounce_1s_infinite]"></div>
+                        <div className="w-0.5 bg-primary-foreground h-2/3 animate-[bounce_1.2s_infinite]"></div>
+                        <div className="w-0.5 bg-primary-foreground h-1/2 animate-[bounce_0.8s_infinite]"></div>
+                      </div>
+                    ) : <Pause className="h-4 w-4 fill-current" />
+                  ) : (
+                    <Play className="h-4 w-4 fill-current ml-0.5 opacity-50 group-hover:opacity-100 transition-opacity" />
+                  )}
                 </div>
                 
-                <div className="min-w-0 flex-1 pr-10 z-10 pointer-events-none">
+                <div className="min-w-0 flex-1 pr-16 z-10 pointer-events-none">
                   <p className={cn('truncate text-[15px] font-semibold', activeTrack?.id === track.id ? 'text-primary' : 'text-foreground')}>{track.title}</p>
                   <div className="flex items-center gap-2 mt-0.5">
                     <p className="truncate text-[11px] text-muted-foreground font-mono bg-secondary/50 px-1.5 rounded">{track.format}</p>
@@ -1359,9 +2065,9 @@ export function PlayerView() {
                   </div>
                 </div>
                 
-                <div className="absolute right-3 top-1/2 -translate-y-1/2 flex items-center bg-background/80 p-1 rounded-lg opacity-0 group-hover:opacity-100 transition-opacity z-20">
-                  <button onClick={() => playTrack(track, displayedTracks)} className="p-1.5 transition-colors cursor-pointer text-muted-foreground hover:text-primary" title="Çal">
-                    <Play className="h-4 w-4 fill-current" />
+                <div className="absolute right-3 top-1/2 -translate-y-1/2 flex items-center bg-background/90 backdrop-blur shadow-sm p-1 rounded-lg opacity-0 group-hover:opacity-100 transition-opacity z-20 border border-border">
+                  <button onClick={(e) => addToQueue(e, track)} className="p-1.5 transition-colors cursor-pointer text-muted-foreground hover:text-primary" title="Sıraya Ekle">
+                    <ListPlus className="h-4 w-4" />
                   </button>
                   <button onClick={(e) => toggleFavorite(e, track.id)} className="p-1.5 transition-colors cursor-pointer" title="Favori">
                     <Heart className={cn("h-4 w-4", favorites.includes(track.id) ? "text-red-500" : "text-muted-foreground hover:text-red-500")} fill={favorites.includes(track.id) ? "currentColor" : "none"} />
@@ -1374,7 +2080,7 @@ export function PlayerView() {
         </div>
       </div>
 
-      <div className="flex min-h-0 flex-1 flex-col items-center justify-center bg-background relative overflow-hidden">
+      <div className="flex min-h-0 flex-1 flex-col items-center justify-start bg-background relative overflow-hidden">
         {rightPanelMode === 'dash' ? (
           <div className="h-full w-full flex flex-col p-8 md:p-12 overflow-y-auto">
             <div className="max-w-4xl mx-auto w-full">
@@ -1383,6 +2089,7 @@ export function PlayerView() {
                   <h2 className="text-3xl font-bold tracking-tight">Listelerim</h2>
                   <p className="text-muted-foreground mt-2">Sol menüden bir şarkıyı tutup kutuların üzerine sürükleyerek anında ekleyin.</p>
                 </div>
+                
                 <button onClick={exportAllTracks} className="shrink-0 flex items-center gap-2 bg-secondary text-foreground px-4 py-2.5 rounded-xl hover:bg-secondary/80 transition-colors font-medium cursor-pointer shadow-sm">
                   <Download className="h-4 w-4" /> Arşivi TXT Çıkar
                 </button>
@@ -1398,17 +2105,7 @@ export function PlayerView() {
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 {Object.keys(playlists).length === 0 && <p className="text-muted-foreground col-span-2 text-center py-10">Henüz listeniz yok.</p>}
                 {Object.keys(playlists).map(p => (
-                  <div 
-                    key={p} 
-                    onClick={() => { setCurrentPlaylist(p); setRightPanelMode('playlist_detail'); }} 
-                    onDragOver={(e) => { e.preventDefault(); setDragOverList(p) }}
-                    onDragLeave={() => setDragOverList(null)}
-                    onDrop={(e) => { setDragOverList(null); handleDropOnPlaylist(e, p); }}
-                    className={cn(
-                      "flex flex-col p-5 rounded-2xl shadow-sm transition-all cursor-pointer group border",
-                      dragOverList === p ? "bg-primary/10 border-primary scale-105" : "bg-sidebar border-border hover:border-primary/50"
-                    )}
-                  >
+                  <div key={p} onClick={() => { setCurrentPlaylist(p); setRightPanelMode('playlist_detail'); }} onDragOver={(e) => { e.preventDefault(); setDragOverList(p) }} onDrop={(e) => { setDragOverList(null); handleDropOnPlaylist(e, p); }} className={cn("flex flex-col p-5 rounded-2xl shadow-sm transition-all cursor-pointer group border", dragOverList === p ? "bg-primary/10 border-primary scale-105" : "bg-sidebar border-border hover:border-primary/50")}>
                     <div className="flex items-center justify-between mb-4 pointer-events-none">
                       <h3 className={cn("font-bold text-lg truncate pr-4 transition-colors", dragOverList === p ? "text-primary" : "group-hover:text-primary")}>{p}</h3>
                       <span className="text-xs font-mono bg-secondary px-2 py-1 rounded-md text-muted-foreground">{playlists[p].length} Şarkı</span>
@@ -1417,9 +2114,7 @@ export function PlayerView() {
                       <button onClick={(e) => exportPlaylist(e, p)} className="p-2 rounded-xl text-muted-foreground hover:bg-secondary hover:text-foreground transition-colors" title="TXT İndir">
                         <Download className="h-5 w-5" />
                       </button>
-                      <button onClick={(e) => deletePlaylist(e, p)} className="p-2 rounded-xl text-muted-foreground hover:bg-red-500/10 hover:text-red-500 transition-colors" title="Sil">
-                        <Trash2 className="h-5 w-5" />
-                      </button>
+                      <button onClick={(e) => deletePlaylist(e, p)} className="p-2 rounded-xl text-muted-foreground hover:bg-red-500/10 hover:text-red-500 transition-colors" title="Sil"><Trash2 className="h-5 w-5" /></button>
                     </div>
                   </div>
                 ))}
@@ -1431,86 +2126,238 @@ export function PlayerView() {
             <div className="max-w-4xl mx-auto w-full flex flex-col h-full">
               <div className="flex items-center gap-4 mb-8">
                 <button onClick={() => setRightPanelMode('dash')} className="p-2 bg-secondary rounded-xl hover:bg-secondary/80 transition-colors cursor-pointer"><ChevronLeft className="h-5 w-5" /></button>
-                <div className="flex-1">
-                  <h2 className="text-3xl font-bold">{currentPlaylist}</h2>
-                  <p className="text-sm text-muted-foreground mt-1 flex items-center gap-1">Soldan şarkıları tutup bu alana sürükleyerek listeye ekleyebilirsiniz.</p>
-                </div>
-                <button onClick={() => playTrack(currentPlaylistTracks[0], currentPlaylistTracks)} disabled={currentPlaylistTracks.length === 0} className="flex items-center gap-2 bg-primary text-primary-foreground px-6 py-3 rounded-xl font-bold hover:bg-primary/90 transition-all disabled:opacity-50 hover:scale-105 active:scale-95 cursor-pointer shadow-md">
+                <div className="flex-1"><h2 className="text-3xl font-bold">{currentPlaylist}</h2></div>
+                
+                {/* LİSTEYE YENİ ŞARKI EKLE BUTONU */}
+                <button 
+                  onClick={() => setRightPanelMode('playlist_add')} 
+                  className="flex items-center gap-2 bg-secondary text-foreground px-4 py-3 rounded-xl font-bold hover:bg-secondary/80 transition-all cursor-pointer shadow-sm"
+                >
+                  <Plus className="h-5 w-5" /> Şarkı Ekle
+                </button>
+
+                <button 
+                  onClick={() => { playTrack(currentPlaylistTracks[0], currentPlaylistTracks, false); setRightPanelMode('player'); }} 
+                  disabled={currentPlaylistTracks.length === 0} 
+                  className="flex items-center gap-2 bg-primary text-primary-foreground px-6 py-3 rounded-xl font-bold hover:bg-primary/90 transition-all disabled:opacity-50 hover:scale-105 active:scale-95 cursor-pointer shadow-md"
+                >
                   <Play className="h-5 w-5 fill-current" /> Listeyi Çal
                 </button>
               </div>
-
-              <div 
-                onDragOver={(e) => { e.preventDefault(); setIsDragOverDetail(true) }}
-                onDragLeave={() => setIsDragOverDetail(false)}
-                onDrop={(e) => { setIsDragOverDetail(false); handleDropOnPlaylist(e, currentPlaylist); }}
-                className={cn("flex-1 overflow-y-auto rounded-2xl p-4 transition-all duration-300 border", isDragOverDetail ? "bg-primary/5 border-primary border-dashed border-2" : "bg-sidebar border-border")}
-              >
+              <div onDragOver={(e) => { e.preventDefault(); setIsDragOverDetail(true) }} onDrop={(e) => { setIsDragOverDetail(false); handleDropOnPlaylist(e, currentPlaylist); }} className={cn("flex-1 overflow-y-auto rounded-2xl p-4 transition-all duration-300 border", isDragOverDetail ? "bg-primary/5 border-primary border-dashed border-2" : "bg-sidebar border-border")}>
                 {currentPlaylistTracks.length === 0 ? (
                   <div className="h-full flex flex-col items-center justify-center text-muted-foreground opacity-50 pointer-events-none">
                     <div className="h-20 w-20 rounded-2xl border-2 border-dashed border-muted-foreground flex items-center justify-center mb-4"><Plus className="h-8 w-8" /></div>
-                    <p className="text-lg font-medium">Şarkıları Buraya Sürükle</p>
+                    <p className="text-lg font-medium">Şarkıları Buraya Sürükle veya Üstteki Butonu Kullan</p>
                   </div>
                 ) : (
-                  <div className="grid grid-cols-1 gap-2">
-                    {currentPlaylistTracks.map(t => (
-                      <div key={t.id} className="flex items-center justify-between p-3 rounded-xl border border-border bg-background hover:bg-accent/50 transition-all group pointer-events-auto">
+                  currentPlaylistTracks.map(t => (
+                    <div key={t.id} className="flex items-center justify-between p-3 rounded-xl border border-border bg-background hover:bg-accent/50 transition-all group pointer-events-auto">
+                      <div className="flex items-center gap-3 overflow-hidden">
+                         <button onClick={() => { playTrack(t, currentPlaylistTracks, false); setRightPanelMode('player'); }} className="h-8 w-8 rounded-lg bg-primary/10 text-primary flex items-center justify-center shrink-0 hover:bg-primary hover:text-primary-foreground transition-colors cursor-pointer"><Play className="h-4 w-4 fill-current ml-0.5" /></button>
+                         <div className="flex flex-col truncate"><span className="font-medium text-sm truncate">{t.title}</span></div>
+                      </div>
+                      <button onClick={(e) => removeTrackFromPlaylist(e, t.id, currentPlaylist)} className="p-2 text-muted-foreground hover:text-red-500 hover:bg-red-500/10 rounded-lg transition-colors opacity-0 group-hover:opacity-100 cursor-pointer" title="Listeden Çıkar"><Trash2 className="h-4 w-4" /></button>
+                    </div>
+                  ))
+                )}
+              </div>
+            </div>
+          </div>
+        ) : rightPanelMode === 'playlist_add' && currentPlaylist ? (
+          /* LİSTEYE ŞARKI EKLEME ÖZEL EKRANI */
+          <div className="h-full w-full flex flex-col p-8 md:p-12 overflow-y-auto">
+            <div className="max-w-4xl mx-auto w-full flex flex-col h-full">
+              <div className="flex items-center gap-4 mb-8">
+                <button onClick={() => setRightPanelMode('playlist_detail')} className="p-2 bg-secondary rounded-xl hover:bg-secondary/80 transition-colors cursor-pointer"><ChevronLeft className="h-5 w-5" /></button>
+                <div className="flex-1">
+                  <h2 className="text-3xl font-bold text-primary">{currentPlaylist}</h2>
+                  <p className="text-sm text-muted-foreground mt-1">Bu listeye kütüphanenden şarkı ekle veya çıkar.</p>
+                </div>
+              </div>
+
+              <div className="flex-1 overflow-y-auto rounded-2xl p-4 bg-sidebar border border-border">
+                {displayedTracks.length === 0 ? (
+                  <p className="text-center text-muted-foreground py-10">Kütüphanede şarkı bulunamadı.</p>
+                ) : (
+                  displayedTracks.map(t => {
+                    const isInPlaylist = playlists[currentPlaylist]?.includes(t.id);
+                    return (
+                      <div key={'add-'+t.id} className="flex items-center justify-between p-3 rounded-xl border border-transparent hover:bg-background transition-all group mb-1">
                         <div className="flex items-center gap-3 overflow-hidden">
-                           <button onClick={() => playTrack(t, currentPlaylistTracks)} className="h-8 w-8 rounded-lg bg-primary/10 text-primary flex items-center justify-center shrink-0 hover:bg-primary hover:text-primary-foreground transition-colors cursor-pointer">
-                             <Play className="h-4 w-4 fill-current ml-0.5" />
-                           </button>
-                           <div className="flex flex-col truncate">
-                              <span className="font-medium text-sm truncate">{t.title}</span>
-                              <span className="text-xs text-muted-foreground">{t.format}</span>
+                           <Music2 className="h-5 w-5 text-muted-foreground shrink-0" />
+                           <div className="flex flex-col truncate pr-4">
+                             <span className="font-medium text-sm truncate">{t.title}</span>
                            </div>
                         </div>
-                        <button onClick={(e) => removeTrackFromPlaylist(e, t.id, currentPlaylist)} className="p-2 text-muted-foreground hover:text-red-500 hover:bg-red-500/10 rounded-lg transition-colors opacity-0 group-hover:opacity-100 cursor-pointer" title="Listeden Çıkar">
-                          <Trash2 className="h-4 w-4" />
+                        <button 
+                          onClick={(e) => {
+                            if (isInPlaylist) {
+                              removeTrackFromPlaylist(e, t.id, currentPlaylist);
+                            } else {
+                              handleDropOnPlaylist({preventDefault: () => {}, dataTransfer: { getData: () => t.id }} as any, currentPlaylist);
+                            }
+                          }} 
+                          className={cn("px-4 py-2 rounded-xl text-xs font-bold transition-colors cursor-pointer shadow-sm shrink-0", isInPlaylist ? "bg-red-500/10 text-red-500 hover:bg-red-500 hover:text-white" : "bg-primary text-primary-foreground hover:bg-primary/90")}
+                        >
+                          {isInPlaylist ? 'Çıkar' : 'Ekle'}
                         </button>
                       </div>
-                    ))}
-                  </div>
+                    )
+                  })
                 )}
               </div>
             </div>
           </div>
         ) : (
-          <div className="flex flex-col items-center justify-center w-full">
-            <div className="relative flex h-72 w-72 items-center justify-center rounded-full bg-sidebar ring-1 ring-border shadow-2xl overflow-hidden transition-all duration-700 hover:scale-105">
-              {isPlaying && (
-                <div className="absolute inset-0 flex items-end justify-center gap-2.5 p-10 opacity-50">
-                  {[...Array(8)].map((_, i) => (
-                    <span key={i} className="w-3 rounded-full bg-primary/80 animate-pulse transition-all" style={{ height: `${20 + Math.random() * 80}%`, animationDelay: `${i * 0.1}s` }} />
+          <div className="flex flex-col items-center justify-start w-full h-full p-8 overflow-y-auto relative">
+            
+            <div className="flex flex-col items-center flex-shrink-0 mt-4 w-full">
+              <div className="relative flex h-64 w-64 items-center justify-center rounded-full bg-sidebar ring-1 ring-border shadow-2xl overflow-hidden transition-all duration-700 hover:scale-105">
+                {isPlaying && (
+                  <div className="absolute inset-0 flex items-end justify-center gap-2.5 p-10 opacity-50">
+                    {[...Array(8)].map((_, i) => (
+                      <span key={i} className="w-3 rounded-full bg-primary/80 animate-pulse transition-all" style={{ height: `${20 + Math.random() * 80}%`, animationDelay: `${i * 0.1}s` }} />
+                    ))}
+                  </div>
+                )}
+                <div className="absolute inset-0 rounded-full border-[20px] border-background/10 pointer-events-none"></div>
+                <Music2 className={cn("relative h-20 w-20 transition-colors duration-500", isPlaying ? "text-primary/70" : "text-primary/30")} />
+              </div>
+              
+              <div className="mt-8 text-center max-w-lg px-8 w-full">
+                  <h2 className="text-3xl font-black tracking-tight truncate pb-2">
+                  {activeTrack ? activeTrack.title : 'Dinlemeye Hazır'}
+                  </h2>
+                  <div className="flex items-center justify-center gap-3 mt-1">
+                      <span className="font-mono text-xs tracking-widest text-muted-foreground uppercase bg-secondary/50 px-3 py-1 rounded-full">
+                          {activeTrack ? (isMidi ? '8-BIT SYNTH' : activeTrack.format) : 'SESSİZLİK'}
+                      </span>
+                  </div>
+              </div>
+
+              {activeTrack && !isMidi && (
+                <div className="w-full max-w-md mt-8 flex flex-col gap-2 px-4">
+                  <input 
+                    type="range" 
+                    min="0" 
+                    max={duration || 100} 
+                    value={currentTime} 
+                    onChange={handleSeek} 
+                    className="w-full h-1.5 bg-secondary rounded-lg appearance-none cursor-pointer accent-primary" 
+                  />
+                  <div className="flex justify-between text-xs text-muted-foreground font-mono font-medium">
+                    <span>{formatTime(currentTime)}</span>
+                    <span>{formatTime(duration)}</span>
+                  </div>
+                </div>
+              )}
+              
+              <div className="mt-6 flex items-center gap-6 w-full max-w-md justify-between px-6">
+                
+                <div className="flex items-center gap-1 w-20">
+                  <button onClick={() => setIsShuffle(!isShuffle)} className={cn("transition-colors p-2 cursor-pointer", isShuffle ? "text-primary" : "text-muted-foreground hover:text-foreground")} title="Karıştır">
+                    <Shuffle className="h-5 w-5" />
+                  </button>
+                  <button onClick={toggleLoop} className={cn("transition-colors p-2 cursor-pointer", loopMode !== 'none' ? "text-primary" : "text-muted-foreground hover:text-foreground")} title={loopMode === 'none' ? 'Döngü Kapalı' : loopMode === 'all' ? 'Tümünü Tekrarla' : 'Geçerli Şarkıyı Tekrarla'}>
+                    {loopMode === 'one' ? <Repeat1 className="h-5 w-5" /> : <Repeat className="h-5 w-5" />}
+                  </button>
+                </div>
+                
+                <div className="flex items-center gap-6">
+                  <button onClick={playPrev} className="text-foreground hover:text-primary transition-colors cursor-pointer"><SkipBack className="h-8 w-8" fill="currentColor" /></button>
+                  <button onClick={togglePlay} disabled={!activeTrack} className="flex h-20 w-20 items-center justify-center rounded-full bg-primary text-primary-foreground shadow-xl transition-all hover:scale-105 active:scale-95 disabled:opacity-50 disabled:hover:scale-100 cursor-pointer">
+                    {isPlaying ? <Pause className="h-8 w-8" fill="currentColor" /> : <Play className="ml-1.5 h-8 w-8" fill="currentColor" />}
+                  </button>
+                  <button onClick={playNext} className="text-foreground hover:text-primary transition-colors cursor-pointer"><SkipForward className="h-8 w-8" fill="currentColor" /></button>
+                </div>
+
+                <div className="flex items-center gap-2 w-20 group">
+                  <button onClick={() => setVolume(volume === 0 ? 1 : 0)} className="text-muted-foreground hover:text-foreground cursor-pointer">
+                    {volume === 0 ? <VolumeX className="h-4 w-4" /> : <Volume2 className="h-4 w-4" />}
+                  </button>
+                  <input 
+                    type="range" 
+                    min="0" max="1" step="0.01" 
+                    value={volume} 
+                    onChange={handleVolume}
+                    className="w-full h-1.5 bg-secondary rounded-lg appearance-none cursor-pointer accent-primary opacity-50 group-hover:opacity-100 transition-opacity" 
+                  />
+                </div>
+              </div>
+            </div>
+
+            <div className="w-full max-w-2xl mt-16 flex flex-col pb-10">
+              <div className="flex items-center justify-between mb-4 border-b border-border pb-3">
+                <h3 className="text-xs font-bold text-muted-foreground uppercase tracking-wider flex items-center gap-2">
+                  <ListMusic className="h-4 w-4"/> Sıradaki Şarkılar
+                </h3>
+                
+                <div className="flex items-center gap-2 bg-sidebar border border-border px-3 py-1.5 rounded-lg focus-within:border-primary/50 transition-colors w-64">
+                  <Search className="h-3.5 w-3.5 text-muted-foreground" />
+                  <input 
+                    type="text" 
+                    value={queueSearchQuery} 
+                    onChange={(e) => setQueueSearchQuery(e.target.value)} 
+                    placeholder="Sıraya şarkı ekle..." 
+                    className="bg-transparent text-xs text-foreground focus:outline-none w-full placeholder:text-muted-foreground/50" 
+                  />
+                </div>
+              </div>
+
+              {queueSearchQuery && (
+                <div className="mb-6 bg-sidebar border border-border rounded-xl p-2 max-h-48 overflow-y-auto z-50">
+                  {filteredQueueSearch.length === 0 ? (
+                     <p className="text-xs text-center text-muted-foreground py-4">Şarkı bulunamadı.</p>
+                  ) : (
+                    filteredQueueSearch.slice(0, 10).map((t: Track) => (
+                      <div key={'qs-'+t.id} className="flex items-center justify-between p-2 hover:bg-accent/50 rounded-lg group">
+                        <span className="text-sm truncate max-w-[300px]">{t.title}</span>
+                        <button onClick={(e) => { addToQueue(e, t); setQueueSearchQuery(''); }} className="text-primary hover:text-primary-foreground hover:bg-primary px-3 py-1 rounded-md text-xs font-bold transition-colors cursor-pointer">
+                          Ekle
+                        </button>
+                      </div>
+                    ))
+                  )}
+                </div>
+              )}
+
+              {queue.length === 0 ? (
+                <p className="text-sm text-center text-muted-foreground py-10 opacity-50">Sırada bekleyen şarkı yok.</p>
+              ) : (
+                <div className="flex flex-col gap-2">
+                  {queue.map((item, idx) => (
+                    <div key={'q-'+item.qid} className={cn("flex items-center gap-4 p-3 rounded-xl border shadow-sm transition-colors group", item.pinned ? "bg-accent/40 border-border" : "bg-sidebar border-border hover:border-primary/30")}>
+                      <span className="text-xs font-bold text-muted-foreground w-6 text-center shrink-0">
+                        {item.pinned ? <Pin className="h-3 w-3 text-primary mx-auto" fill="currentColor" /> : idx + 1}
+                      </span>
+                      
+                      <div className="flex-1 truncate pr-2">
+                        <p className={cn("text-sm font-medium truncate transition-colors", item.pinned ? "text-primary" : "text-foreground group-hover:text-primary")}>{item.track.title}</p>
+                      </div>
+                      
+                      <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                        <button onClick={() => moveQueueItem(idx, -1)} className="p-1.5 text-muted-foreground hover:text-primary cursor-pointer rounded-md bg-background border border-border" title="Yukarı Taşı">
+                          <ArrowUp className="h-3.5 w-3.5" />
+                        </button>
+                        <button onClick={() => moveQueueItem(idx, 1)} className="p-1.5 text-muted-foreground hover:text-primary cursor-pointer rounded-md bg-background border border-border mr-2" title="Aşağı Taşı">
+                          <ArrowDown className="h-3.5 w-3.5" />
+                        </button>
+
+                        <button onClick={() => toggleQueuePin(item.qid)} className={cn("p-1.5 transition-colors cursor-pointer rounded-md border border-border", item.pinned ? "text-primary hover:text-muted-foreground bg-primary/10" : "text-muted-foreground hover:text-primary bg-background")} title={item.pinned ? "Sabitlemeyi Kaldır" : "Üste Sabitle"}>
+                          <Pin className="h-3.5 w-3.5" />
+                        </button>
+                        <button onClick={() => { setQueue(prev => prev.filter(q => q.qid !== item.qid)); playTrack(item.track, currentQueueRef.current, true); }} className="p-1.5 text-muted-foreground hover:text-primary cursor-pointer rounded-md bg-background border border-border" title="Hemen Çal">
+                          <Play className="h-3.5 w-3.5 fill-current ml-0.5"/>
+                        </button>
+                        <button onClick={() => removeFromQueue(item.qid)} className="p-1.5 text-muted-foreground hover:text-red-500 cursor-pointer rounded-md bg-background border border-border" title="Sıradan Çıkar">
+                          <Trash2 className="h-3.5 w-3.5"/>
+                        </button>
+                      </div>
+                    </div>
                   ))}
                 </div>
               )}
-              <div className="absolute inset-0 rounded-full border-[20px] border-background/10 pointer-events-none"></div>
-              <Music2 className={cn("relative h-24 w-24 transition-colors duration-500", isPlaying ? "text-primary/70" : "text-primary/30")} />
-            </div>
-            
-            <div className="mt-12 text-center max-w-lg px-8">
-                <h2 className="text-4xl font-black tracking-tight truncate pb-2">
-                {activeTrack ? activeTrack.title : 'Dinlemeye Hazır'}
-                </h2>
-                <div className="flex items-center justify-center gap-3 mt-1">
-                    <span className="font-mono text-sm tracking-widest text-muted-foreground uppercase bg-secondary/50 px-3 py-1 rounded-full">
-                        {activeTrack ? (isMidi ? '8-BIT SYNTH' : activeTrack.format) : 'SESSİZLİK'}
-                    </span>
-                </div>
-            </div>
-            
-            <div className="mt-12 flex items-center gap-10">
-              <button onClick={() => setIsShuffle(!isShuffle)} className={cn("transition-colors p-2 cursor-pointer", isShuffle ? "text-primary" : "text-muted-foreground hover:text-foreground")}>
-                <Shuffle className="h-6 w-6" />
-              </button>
-              
-              <div className="flex items-center gap-6">
-                <button onClick={playPrev} className="text-foreground hover:text-primary transition-colors cursor-pointer"><SkipBack className="h-10 w-10" fill="currentColor" /></button>
-                <button onClick={togglePlay} disabled={!activeTrack} className="flex h-24 w-24 items-center justify-center rounded-full bg-primary text-primary-foreground shadow-xl transition-all hover:scale-105 active:scale-95 disabled:opacity-50 disabled:hover:scale-100 cursor-pointer">
-                  {isPlaying ? <Pause className="h-10 w-10" fill="currentColor" /> : <Play className="ml-2 h-10 w-10" fill="currentColor" />}
-                </button>
-                <button onClick={playNext} className="text-foreground hover:text-primary transition-colors cursor-pointer"><SkipForward className="h-10 w-10" fill="currentColor" /></button>
-              </div>
             </div>
           </div>
         )}
@@ -1731,17 +2578,20 @@ import {
   Command,
   Search,
   Settings,
-  FolderOpen, // KLASÖR İKONU EKLENDİ
+  FolderOpen,
+  CalendarDays, // TAKVİM İKONU EKLENDİ
   type LucideProps,
 } from 'lucide-react'
 import { NotesView } from './components/NotesView'
 import { GithubView } from './components/GithubView'
 import { PlayerView } from './components/PlayerView'
-import { ProjectsView } from './components/ProjectsView' // YEREL PROJELER EKRANI ÇAĞRILDI
+import { ProjectsView } from './components/ProjectsView'
+import { CalendarView } from './components/CalendarView' // YENİ EKRANIMIZ
+import { SetupWizard } from './components/SetupWizard'
 import { cn } from './lib/utils'
 
-// 4. MENÜ ID'Sİ EKLENDİ ('projects')
-type ViewId = 'notes' | 'github' | 'player' | 'projects'
+// 'calendar' ID'Sİ EKLENDİ
+type ViewId = 'notes' | 'github' | 'player' | 'projects' | 'calendar'
 
 interface NavItem {
   id: ViewId
@@ -1751,7 +2601,8 @@ interface NavItem {
 
 const NAV_ITEMS: readonly NavItem[] = [
   { id: 'notes', label: 'Notes', icon: FileText },
-  { id: 'projects', label: 'Projects', icon: FolderOpen }, // YENİ MENÜ BUTONUMUZ
+  { id: 'calendar', label: 'Calendar', icon: CalendarDays }, // TAKVİM MENÜSÜ
+  { id: 'projects', label: 'Projects', icon: FolderOpen },
   { id: 'github', label: 'Repositories', icon: GitBranch },
   { id: 'player', label: 'Player', icon: Music },
 ]
@@ -1787,7 +2638,7 @@ const SidebarButton: FC<SidebarButtonProps> = ({
     title={label}
     aria-label={label}
     className={cn(
-      'group relative flex h-11 w-11 items-center justify-center rounded-xl transition-colors',
+      'group relative flex h-11 w-11 items-center justify-center rounded-xl transition-colors cursor-pointer',
       isActive
         ? 'bg-accent text-primary'
         : 'text-muted-foreground hover:bg-accent/60 hover:text-foreground',
@@ -1861,26 +2712,19 @@ const MobileNav: FC<MobileNavProps> = ({ currentView, onSetView }) => (
 )
 
 export default function App() {
-  const [view, setView] = useState<ViewId>('notes')
+  const [view, setView] = useState<ViewId>('calendar') // Varsayılan olarak takvimi açsın
 
   return (
     <div className="flex h-screen w-full overflow-hidden bg-background text-foreground">
+      <SetupWizard />
       <DesktopSidebar currentView={view} onSetView={setView} />
-      
+
       <main className="flex min-w-0 flex-1 flex-col pb-16 md:pb-0 h-full w-full">
-        {/* YEREL PROJELER EKRANI (ProjectsView) BURAYA EKLENDİ */}
-        <div className={cn("h-full w-full", view === 'notes' ? 'block' : 'hidden')}>
-          <NotesView />
-        </div>
-        <div className={cn("h-full w-full", view === 'projects' ? 'block' : 'hidden')}>
-          <ProjectsView />
-        </div>
-        <div className={cn("h-full w-full", view === 'github' ? 'block' : 'hidden')}>
-          <GithubView />
-        </div>
-        <div className={cn("h-full w-full", view === 'player' ? 'block' : 'hidden')}>
-          <PlayerView />
-        </div>
+        <div className={cn("h-full w-full", view === 'notes' ? 'block' : 'hidden')}><NotesView /></div>
+        <div className={cn("h-full w-full", view === 'calendar' ? 'block' : 'hidden')}><CalendarView /></div>
+        <div className={cn("h-full w-full", view === 'projects' ? 'block' : 'hidden')}><ProjectsView /></div>
+        <div className={cn("h-full w-full", view === 'github' ? 'block' : 'hidden')}><GithubView /></div>
+        <div className={cn("h-full w-full", view === 'player' ? 'block' : 'hidden')}><PlayerView /></div>
       </main>
 
       <MobileNav currentView={view} onSetView={setView} />
@@ -1929,8 +2773,10 @@ ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
 use serde::Serialize;
 use std::fs;
 use std::io::Write;
-use std::path::Path;
-use std::process::Command; // İDE'leri başlatmak için gerekli
+use std::path::{Path, PathBuf};
+use std::process::Command;
+use tauri::path::BaseDirectory;
+use tauri::Manager;
 
 #[derive(Serialize, Clone)]
 pub struct Track {
@@ -1981,8 +2827,10 @@ fn read_audio_file(path: &str) -> Result<Vec<u8>, String> {
 #[tauri::command]
 fn save_txt_file(path: &str, content: &str) -> Result<(), String> {
     let mut file = std::fs::OpenOptions::new().write(true).create(true).truncate(true).open(path).map_err(|e| format!("Dosya açılamadı: {}", e))?;
-    file.write_all(b"\xEF\xBB\xBF").map_err(|e| format!("BOM yazılamadı: {}", e))?;
+    
+    // KRİTİK DÜZELTME: BOM (Görünmez karakter) söküldü! Lua scripti artık ilk satırı yutmayacak.
     file.write_all(content.as_bytes()).map_err(|e| format!("Dosyaya yazılamadı: {}", e))?;
+    
     Ok(())
 }
 
@@ -2031,9 +2879,6 @@ fn get_projects(folder_path: &str) -> Result<Vec<ProjectData>, String> {
     Ok(projects)
 }
 
-// ==========================================
-// KUSURSUZ İDE AÇICI (TÜM İDE'LER EKLENDİ)
-// ==========================================
 #[tauri::command]
 fn open_in_ide(path: &str, ide: &str) -> Result<(), String> {
     let is_win = cfg!(target_os = "windows");
@@ -2081,13 +2926,89 @@ fn open_in_ide(path: &str, ide: &str) -> Result<(), String> {
     Ok(())
 }
 
+// GÖMÜLÜ KAYNAK: resources/ klasöründeki dosyayı her iki modda da (dev + paketlenmiş) bulur.
+// Aday sırası:
+//   1) $RESOURCE/<dosya>              -> bundle.resources map/modu ile gömülmüş hali
+//   2) $RESOURCE/resources/<dosya>    -> liste tanımda yapı korunarak kopyalanan hali
+//   3) CARGO_MANIFEST_DIR/resources/  -> tauri dev'de doğrudan kaynak klasörden (build kopyası olmadan da çalışır)
+fn resolve_bundled_resource(app_handle: &tauri::AppHandle, file_name: &str) -> Result<PathBuf, String> {
+    let mut candidates: Vec<PathBuf> = Vec::new();
+
+    if let Ok(resource_dir) = app_handle.path().resource_dir() {
+        candidates.push(resource_dir.join(file_name));
+        candidates.push(resource_dir.join("resources").join(file_name));
+    }
+
+    if let Ok(resolved) = app_handle.path().resolve(file_name, BaseDirectory::Resource) {
+        candidates.push(resolved);
+    }
+
+    candidates.push(
+        PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("resources")
+            .join(file_name),
+    );
+
+    candidates
+        .into_iter()
+        .find(|path| path.exists())
+        .ok_or_else(|| {
+            format!(
+                "Gömülü kaynak bulunamadı: {}. Dosyayı src-tauri/resources/ klasörüne ekleyin.",
+                file_name
+            )
+        })
+}
+
+#[tauri::command]
+fn install_rainmeter_widgets(app_handle: tauri::AppHandle) -> Result<String, String> {
+    let is_win = cfg!(target_os = "windows");
+    if !is_win { return Err("Bu özellik sadece Windows'ta geçerlidir.".into()); }
+
+    let rainmeter_path = Path::new("C:\\Program Files\\Rainmeter\\Rainmeter.exe");
+    let skin_installer_path = Path::new("C:\\Program Files\\Rainmeter\\SkinInstaller.exe");
+
+    // Uygulama içine gömdüğümüz resources yollarını Tauri v2 API'si ile alıyoruz
+    let bundled_rainmeter_exe = resolve_bundled_resource(&app_handle, "Rainmeter-4.5.exe")?;
+    let bundled_skin = resolve_bundled_resource(&app_handle, "Ultimate.rmskin")?;
+
+    // 1. AŞAMA: Rainmeter kurulu mu diye bak
+    if !rainmeter_path.exists() {
+        // Kurulu değilse, kendi gömdüğümüz Rainmeter Setup'ını başlat
+        Command::new("cmd")
+            .arg("/C")
+            .arg(&bundled_rainmeter_exe)
+            .spawn()
+            .map_err(|e| format!("Rainmeter kurulumu başlatılamadı: {}", e))?;
+
+        return Ok("RAINMETER_SETUP_STARTED".into());
+    }
+
+    // 2. AŞAMA: Rainmeter kuruluysa, bizim .rmskin paketimizi otomatik kur!
+    if skin_installer_path.exists() {
+        Command::new(skin_installer_path)
+            .arg(&bundled_skin)
+            .spawn()
+            .map_err(|e| format!("Tema kurulamadı: {}", e))?;
+
+        // Temayı anında ekranda göster
+        let _ = Command::new(rainmeter_path)
+            .args(["!ActivateConfig", "Ultimate", "Ultimate.ini"])
+            .spawn();
+
+        return Ok("WIDGET_INSTALLED".into());
+    }
+
+    Err("Bilinmeyen bir hata oluştu.".into())
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_fs::init()) 
         .plugin(tauri_plugin_dialog::init()) 
-        .invoke_handler(tauri::generate_handler![scan_music_folder, read_audio_file, save_txt_file, get_projects, open_in_ide]) 
+        .invoke_handler(tauri::generate_handler![scan_music_folder, read_audio_file, save_txt_file, get_projects, open_in_ide, install_rainmeter_widgets]) 
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }
@@ -2184,6 +3105,9 @@ tauri-plugin-dialog = "2.7.2"
       "icons/128x128@2x.png",
       "icons/icon.icns",
       "icons/icon.ico"
+    ],
+    "resources": [
+      "resources/**/*"
     ]
   }
 }
@@ -2252,6 +3176,10 @@ dist-ssr
     "@tauri-apps/plugin-dialog": "^2.7.2",
     "@tauri-apps/plugin-fs": "^2.5.1",
     "@tauri-apps/plugin-opener": "^2",
+    "@tiptap/extension-image": "^3.31.4",
+    "@tiptap/extension-placeholder": "^3.31.4",
+    "@tiptap/react": "^3.31.4",
+    "@tiptap/starter-kit": "^3.31.4",
     "@tonejs/midi": "^2.0.28",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
