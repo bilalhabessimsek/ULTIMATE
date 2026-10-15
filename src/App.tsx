@@ -19,6 +19,7 @@ import { CalendarView } from './components/CalendarView' // TAKVİM EKRANI ÇAĞ
 import { SetupWizard } from './components/SetupWizard' // İLK KURULUM SİHİRBAZI ÇAĞRILDI
 import { LoginView } from './components/LoginView' // GİRİŞ EKRANI ÇAĞRILDI
 import { supabase } from './lib/supabase'
+import { setCurrentUserId, hasLegacyKeys, claimLegacyKeys } from './lib/userStorage'
 import type { Session } from '@supabase/supabase-js'
 import { cn } from './lib/utils'
 
@@ -176,6 +177,7 @@ export default function App() {
   const [view, setView] = useState<ViewId>('notes')
   const [session, setSession] = useState<Session | null>(null)
   const [authReady, setAuthReady] = useState(false)
+  const [storageReady, setStorageReady] = useState(false)
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data }) => {
@@ -195,7 +197,51 @@ export default function App() {
     await supabase.auth.signOut()
   }
 
-  if (!authReady) {
+  // Oturum değişince yerel depolamayı o hesaba göre hazırla.
+  // Eski (hesap öneki olmayan) veriler yalnızca bulutunda verisi olan
+  // "kurulu" hesaba devredilir; yeni/boş bir hesap onları sahiplenemez.
+  useEffect(() => {
+    if (!authReady) return
+    let cancelled = false
+
+    const prepareStorage = async () => {
+      if (!session) {
+        setCurrentUserId(null)
+        setStorageReady(true)
+        return
+      }
+
+      setStorageReady(false)
+      setCurrentUserId(session.user.id)
+
+      if (hasLegacyKeys()) {
+        try {
+          const { count } = await supabase
+            .from('notes')
+            .select('id', { count: 'exact', head: true })
+
+          if (cancelled) return
+
+          if ((count ?? 0) > 0) {
+            claimLegacyKeys()
+            console.info('Eski yerel veriler bu hesaba devredildi.')
+          }
+        } catch (err) {
+          console.error('Yerel veri devri kontrolü başarısız:', err)
+        }
+      }
+
+      if (!cancelled) setStorageReady(true)
+    }
+
+    prepareStorage()
+
+    return () => {
+      cancelled = true
+    }
+  }, [session, authReady])
+
+  if (!authReady || (session && !storageReady)) {
     return (
       <div className="flex h-screen w-full items-center justify-center bg-background text-sm text-muted-foreground">
         Yükleniyor...

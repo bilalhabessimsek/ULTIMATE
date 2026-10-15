@@ -7,6 +7,7 @@ import * as Tone from 'tone'
 import { Midi } from '@tonejs/midi'
 import { supabase } from '../lib/supabase'
 import { getUserId } from '../lib/auth'
+import { uGet, uSet } from '../lib/userStorage'
 
 type Track = {
   id: string
@@ -117,11 +118,11 @@ export function PlayerView() {
     audioRef.current.ontimeupdate = () => setCurrentTime(audioRef.current?.currentTime || 0)
     audioRef.current.onloadedmetadata = () => setDuration(audioRef.current?.duration || 0)
 
-    const savedFavs = localStorage.getItem('music_favs')
+    const savedFavs = uGet('music_favs')
     if (savedFavs) setFavorites(JSON.parse(savedFavs))
-    const savedPlaylists = localStorage.getItem('music_playlists')
+    const savedPlaylists = uGet('music_playlists')
     if (savedPlaylists) setPlaylists(JSON.parse(savedPlaylists))
-    const savedCounts = localStorage.getItem('music_playcounts')
+    const savedCounts = uGet('music_playcounts')
     if (savedCounts) setPlayCounts(JSON.parse(savedCounts))
 
     // Hatırlanan müzik klasörü varsa açılışta sessizce tara
@@ -155,7 +156,7 @@ export function PlayerView() {
   // Eski veriler tarama sırasına göre üretildiği için aynı sırayla eşleştirmeyi deniyoruz;
   // eşleşmeyen kayıtlar silinmez, olduğu gibi bırakılır.
   const migrateLegacyIds = (scannedTracks: Track[]) => {
-    if (localStorage.getItem('music_ids_migrated_v2') === 'done') return
+    if (uGet('music_ids_migrated_v2') === 'done') return
     if (scannedTracks.length === 0) return
 
     const idMap: Record<string, string> = {}
@@ -163,14 +164,14 @@ export function PlayerView() {
     const mapId = (oldId: string) => idMap[oldId] || oldId
 
     try {
-      const savedFavs = localStorage.getItem('music_favs')
+      const savedFavs = uGet('music_favs')
       if (savedFavs) {
         const migrated = (JSON.parse(savedFavs) as string[]).map(mapId)
         setFavorites(migrated)
-        localStorage.setItem('music_favs', JSON.stringify(migrated))
+        uSet('music_favs', JSON.stringify(migrated))
       }
 
-      const savedPlaylists = localStorage.getItem('music_playlists')
+      const savedPlaylists = uGet('music_playlists')
       if (savedPlaylists) {
         const lists = JSON.parse(savedPlaylists) as Record<string, string[]>
         const migrated: Record<string, string[]> = {}
@@ -178,10 +179,10 @@ export function PlayerView() {
           migrated[name] = (ids || []).map(mapId)
         }
         setPlaylists(migrated)
-        localStorage.setItem('music_playlists', JSON.stringify(migrated))
+        uSet('music_playlists', JSON.stringify(migrated))
       }
 
-      const savedCounts = localStorage.getItem('music_playcounts')
+      const savedCounts = uGet('music_playcounts')
       if (savedCounts) {
         const counts = JSON.parse(savedCounts) as Record<string, number>
         const migrated: Record<string, number> = {}
@@ -190,13 +191,13 @@ export function PlayerView() {
           migrated[newId] = (migrated[newId] || 0) + count
         }
         setPlayCounts(migrated)
-        localStorage.setItem('music_playcounts', JSON.stringify(migrated))
+        uSet('music_playcounts', JSON.stringify(migrated))
       }
     } catch (err) {
       console.error('Eski ID göçü hatası:', err)
     }
 
-    localStorage.setItem('music_ids_migrated_v2', 'done')
+    uSet('music_ids_migrated_v2', 'done')
   }
 
   const loadTracks = async (folderPath: string, silent = false) => {
@@ -218,7 +219,7 @@ export function PlayerView() {
 
   const readLocalJson = <T,>(key: string, fallback: T): T => {
     try {
-      const raw = localStorage.getItem(key)
+      const raw = uGet(key)
       return raw ? (JSON.parse(raw) as T) : fallback
     } catch {
       return fallback
@@ -268,7 +269,7 @@ export function PlayerView() {
 
       if (Object.keys(remotePlaylists).length > 0) {
         setPlaylists(remotePlaylists)
-        localStorage.setItem('music_playlists', JSON.stringify(remotePlaylists))
+        uSet('music_playlists', JSON.stringify(remotePlaylists))
       }
 
       const { data: stateRows, error: stateError } = await supabase.from('music_state').select('key, value')
@@ -282,13 +283,13 @@ export function PlayerView() {
       if (Array.isArray(state.favorites)) {
         const favs = state.favorites as string[]
         setFavorites(favs)
-        localStorage.setItem('music_favs', JSON.stringify(favs))
+        uSet('music_favs', JSON.stringify(favs))
       }
 
       if (state.play_counts && typeof state.play_counts === 'object') {
         const counts = state.play_counts as Record<string, number>
         setPlayCounts(counts)
-        localStorage.setItem('music_playcounts', JSON.stringify(counts))
+        uSet('music_playcounts', JSON.stringify(counts))
       }
     } catch (err) {
       console.error('Supabase müzik verisi çekilemedi:', err)
@@ -299,7 +300,7 @@ export function PlayerView() {
   // Bulut zaten doluysa yukarıdaki çekme işlemi yereli bulutla eşitlediği için
   // bu göç sadece aynı veriyi tekrar yazmış olur; zararsız.
   const pushLocalMusicDataToCloud = async () => {
-    if (localStorage.getItem('music_cloud_migrated_v2') === 'done') return
+    if (uGet('music_cloud_migrated_v2') === 'done') return
 
     const userId = await getUserId()
     if (!userId) return
@@ -321,6 +322,9 @@ export function PlayerView() {
 
     const counts = readLocalJson<Record<string, number>>('music_playcounts', {})
     if (Object.keys(counts).length > 0) await pushMusicState('play_counts', counts)
+
+    // Göç tamamlandı olarak işaretle; aksi halde her klasör taramasında tekrar yükleniyordu.
+    uSet('music_cloud_migrated_v2', 'done')
   }
 
   const stopCurrentTrack = () => {
@@ -366,7 +370,7 @@ export function PlayerView() {
 
     const newCounts = { ...playCounts, [track.id]: (playCounts[track.id] || 0) + 1 }
     setPlayCounts(newCounts)
-    localStorage.setItem('music_playcounts', JSON.stringify(newCounts))
+    uSet('music_playcounts', JSON.stringify(newCounts))
     pushMusicState('play_counts', newCounts)
 
     if ('mediaSession' in navigator) {
@@ -518,7 +522,7 @@ export function PlayerView() {
     e.stopPropagation()
     const newFavs = favorites.includes(id) ? favorites.filter(fav => fav !== id) : [...favorites, id]
     setFavorites(newFavs)
-    localStorage.setItem('music_favs', JSON.stringify(newFavs))
+    uSet('music_favs', JSON.stringify(newFavs))
     pushMusicState('favorites', newFavs)
   }
 
@@ -559,7 +563,7 @@ export function PlayerView() {
     if (playlists[newListName.trim()]) { alert("Bu isimde bir liste zaten var!"); return }
     const newPlaylists = { ...playlists, [newListName.trim()]: [] }
     setPlaylists(newPlaylists)
-    localStorage.setItem('music_playlists', JSON.stringify(newPlaylists))
+    uSet('music_playlists', JSON.stringify(newPlaylists))
     pushPlaylist(newListName.trim(), [])
     setNewListName('')
   }
@@ -570,7 +574,7 @@ export function PlayerView() {
     const newPlaylists = { ...playlists }
     delete newPlaylists[name]
     setPlaylists(newPlaylists)
-    localStorage.setItem('music_playlists', JSON.stringify(newPlaylists))
+    uSet('music_playlists', JSON.stringify(newPlaylists))
     removePlaylistRemote(name)
     if (currentPlaylist === name) { setRightPanelMode('dash'); setCurrentPlaylist(null) }
   }
@@ -584,7 +588,7 @@ export function PlayerView() {
       const newList = [...currentList, trackId]
       const newPlaylists = { ...playlists, [listName]: newList }
       setPlaylists(newPlaylists)
-      localStorage.setItem('music_playlists', JSON.stringify(newPlaylists))
+      uSet('music_playlists', JSON.stringify(newPlaylists))
       pushPlaylist(listName, newList)
     }
   }
@@ -595,7 +599,7 @@ export function PlayerView() {
     const newList = currentList.filter(id => id !== trackId)
     const newPlaylists = { ...playlists, [listName]: newList }
     setPlaylists(newPlaylists)
-    localStorage.setItem('music_playlists', JSON.stringify(newPlaylists))
+    uSet('music_playlists', JSON.stringify(newPlaylists))
     pushPlaylist(listName, newList)
   }
 

@@ -1,6 +1,7 @@
 import { useState, useEffect, useMemo } from 'react'
 import { CalendarDays, ChevronLeft, ChevronRight, Plus, Trash2, MonitorSmartphone, CloudOff } from 'lucide-react'
 import { cn } from '../lib/utils'
+import { uGet, uSet } from '../lib/userStorage'
 import { invoke } from '@tauri-apps/api/core'
 import { open } from '@tauri-apps/plugin-dialog'
 import { supabase } from '../lib/supabase'
@@ -33,7 +34,7 @@ export function CalendarView() {
   // Yerel önbellekten okuma (uygulama anında dolu açılsın diye)
   const readLocalCache = (): EventItem[] => {
     try {
-      const saved = localStorage.getItem('ultimate_events')
+      const saved = uGet('ultimate_events')
       if (!saved) return []
       const parsed = JSON.parse(saved) as Record<string, string[]>
       let tempId = -1
@@ -124,7 +125,7 @@ export function CalendarView() {
   }, [events])
 
   useEffect(() => {
-    localStorage.setItem('ultimate_events', JSON.stringify(
+    uSet('ultimate_events', JSON.stringify(
       Object.fromEntries(Object.entries(eventsByDate).map(([date, list]) => [date, list.map((e) => e.title)]))
     ))
     syncWithRainmeter(eventsByDate)

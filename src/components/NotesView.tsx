@@ -5,6 +5,7 @@ import { convertFileSrc } from '@tauri-apps/api/core'
 import { open, save } from '@tauri-apps/plugin-dialog'
 import { cn } from '../lib/utils'
 import { supabase } from '../lib/supabase'
+import { uGet, uSet } from '../lib/userStorage'
 
 // TipTap Editör Kütüphaneleri
 import { useEditor, EditorContent } from '@tiptap/react'
@@ -65,7 +66,7 @@ export function NotesView() {
       }
     } catch (err) {
       console.error('Supabase fetch error:', err)
-      const savedNotes = localStorage.getItem('ultimate_notes')
+      const savedNotes = uGet('ultimate_notes')
       if (savedNotes) {
         const parsed = JSON.parse(savedNotes)
         setNotes(parsed)
@@ -131,7 +132,7 @@ export function NotesView() {
   const handleManualSave = async (latestNotes?: Note[]) => {
     const notesToProcess = latestNotes || notes;
     setIsSaving(true)
-    localStorage.setItem('ultimate_notes', JSON.stringify(notesToProcess))
+    uSet('ultimate_notes', JSON.stringify(notesToProcess))
 
     try {
       for (const note of notesToProcess) {
