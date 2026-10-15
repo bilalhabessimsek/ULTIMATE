@@ -129,6 +129,7 @@ Notların bulutta senkronize olması için tek seferlik kurulum gerekir:
 4. **Tablolar + politikalar + realtime:** `supabase/schema.sql` dosyasının **tamamını** SQL editöründe çalıştırın. Script;
    - `notes`, `calendar_events`, `playlists`, `music_state` tablolarını,
    - **hesaba bağlı** RLS politikalarını (`auth.uid() = user_id`),
+   - not resimleri için **`note-images` Storage bucket'ını** ve yazma/silme politikalarını (9. bölüm),
    - realtime yayın üyeliğini
    
    tek seferde kurar. Ayrıca 7. bölümü sahipsiz eski satırları ilk kullanıcıya bağlar ve bileşik anahtarları (`user_id + name/key`) oluşturur.
@@ -142,6 +143,30 @@ curl -s -H "apikey: $VITE_SUPABASE_ANON_KEY" \
   "https://<proje-ref>.supabase.co/rest/v1/notes?select=id&limit=1"
 ```
 Oturum açılmadığı için `[]` dönmesi **beklenen** davranıştır (RLS veriyi kapatıyor). Yazma denemesi `42501` ile reddedilmeli.
+
+### 🖼️ Not Resimleri (Supabase Storage)
+
+Notlara eklenen resimler artık **base64 olarak veritabanına gömülmez**. Resim Supabase Storage'daki `note-images` bucket'ına yüklenir, nota yalnızca kısa bir genel URL yazılır.
+
+**Neden?** Base64 gömme resmi ~%33 şişirir ve `notes.content` kolonunu megabaytlara çıkarır; ayrıca resim yalnızca o bilgisayarda kalırdı. Storage ile veritabanı küçük kalır ve resim **tüm cihazlarda** görünür.
+
+Üç yolla resim eklenebilir:
+
+| Yöntem | Nasıl |
+|---|---|
+| **Buton** | Araç çubuğundaki 🖼️ ikonu → dosya seçici |
+| **Yapıştır** | Ekran görüntüsünü kopyala → editörde **Ctrl+V** |
+| **Sürükle-bırak** | Resim dosyasını editörün üzerine bırak |
+
+Yükleme sırasında araç çubuğunda "Resim yükleniyor..." göstergesi çıkar; hata olursa kırmızı bir uyarı bandı görünür.
+
+**Kurulum:** `supabase/schema.sql` **9. bölümünü** (bucket + politikalar) bir kez çalıştırmak yeterlidir — dosyanın tamamını çalıştırdıysanız zaten kurulmuştur. Bucket'ı Dashboard'dan elle de açabilirsiniz:
+
+1. **Storage → New bucket** → ad: **`note-images`** → **Public bucket** açık → *Create*.
+2. **Policies** için yukarıdaki SQL'i çalıştırın (yazma/silme yalnızca kendi `<user_id>/` klasörüne izinlidir).
+
+> 🔒 Bucket **public** olduğu için bağlantıyı bilen resmi görüntüleyebilir (URL'ler rastgele ve tahmin edilemez). Kişisel kullanım için pratiktir; tam gizlilik istersen bucket'ı private yapıp imzalı URL üretimine geçebiliriz.
+> 📦 Ücretsiz plan Storage kotası 1 GB'dır. Tek resim üst sınırı uygulama tarafında **10 MB**.
 
 ---
 

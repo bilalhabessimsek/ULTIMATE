@@ -1,11 +1,10 @@
-import { useState, useEffect } from 'react'
-import { Plus, Search, Pin, Trash2, Tag, FileText, MonitorSmartphone, Download, Upload, Save, Check, Bold, Italic, Heading, ImageIcon } from 'lucide-react'
+import { useState, useEffect, useRef } from 'react'
+import { Plus, Search, Pin, Trash2, Tag, FileText, MonitorSmartphone, Download, Upload, Save, Check, Bold, Italic, Heading, ImageIcon, Loader2, CloudUpload } from 'lucide-react'
 import { invoke } from '@tauri-apps/api/core'
-import { convertFileSrc } from '@tauri-apps/api/core'
 import { open, save } from '@tauri-apps/plugin-dialog'
 import { cn } from '../lib/utils'
 import { supabase } from '../lib/supabase'
-import { uGet, uSet } from '../lib/userStorage'
+import { uGet, uSet, getActiveUserId } from '../lib/userStorage'
 
 // TipTap Editör Kütüphaneleri
 import { useEditor, EditorContent } from '@tiptap/react'
@@ -22,12 +21,19 @@ type Note = {
   pinned: boolean
 }
 
+/** Not resimlerinin yüklendiği Supabase Storage bucket'ı (supabase/schema.sql, 9. bölüm) */
+const NOTE_IMAGES_BUCKET = 'note-images'
+/** Tek resim için üst sınır (MB) - Storage kotasını korur */
+const MAX_IMAGE_MB = 10
+
 export function NotesView() {
   const [notes, setNotes] = useState<Note[]>([])
   const [activeId, setActiveId] = useState<string | null>(null)
   const [searchQuery, setSearchQuery] = useState('')
   const [isSaving, setIsSaving] = useState(false)
   const [rainmeterPath, setRainmeterPath] = useState<string | null>(null)
+  const [isUploadingImage, setIsUploadingImage] = useState(false)
+  const [uploadError, setUploadError] = useState<string | null>(null)
 
   const fetchNotes = async () => {
     try {
@@ -98,10 +104,76 @@ export function NotesView() {
 
   const activeNote = notes.find(n => n.id === activeId)
 
+  // ------------------------------------------------------------------
+  // NOT RESİMLERİ: Supabase Storage'a yükleme
+  // Resimler artık base64 olarak not içeriğine gömülmez; Storage'a yüklenir
+  // ve nota yalnızca genel URL yazılır (DB şişmez, diğer cihazlarda da görünür).
+  // ------------------------------------------------------------------
+  const uploadImageRef = useRef<(file: File, pos?: number) => Promise<void>>(async () => {})
+
+  const uploadNoteImage = async (file: File): Promise<string> => {
+    const userId = getActiveUserId() ?? (await supabase.auth.getUser()).data.user?.id
+    if (!userId) throw new Error('Oturum bulunamadı, tekrar giriş yap.')
+
+    const ext = (file.name.split('.').pop() || 'png').toLowerCase().replace(/[^a-z0-9]/g, '') || 'png'
+    const path = `${userId}/${Date.now()}_${Math.random().toString(36).slice(2, 10)}.${ext}`
+
+    const { error } = await supabase.storage
+      .from(NOTE_IMAGES_BUCKET)
+      .upload(path, file, {
+        cacheControl: '31536000',
+        contentType: file.type || 'image/png',
+        upsert: false,
+      })
+    if (error) throw error
+
+    const { data } = supabase.storage.from(NOTE_IMAGES_BUCKET).getPublicUrl(path)
+    if (!data?.publicUrl) throw new Error('Genel bağlantı alınamadı.')
+    return data.publicUrl
+  }
+
+  // Resmi yükleyip imlecin olduğu yere (veya mevcut konuma) ekler
+  const uploadAndInsertImage = async (file: File, pos?: number) => {
+    if (!editor) return
+    if (!file.type.startsWith('image/')) return
+    if (file.size > MAX_IMAGE_MB * 1024 * 1024) {
+      setUploadError(`Resim çok büyük (en fazla ${MAX_IMAGE_MB} MB).`)
+      return
+    }
+
+    setUploadError(null)
+    setIsUploadingImage(true)
+    try {
+      const url = await uploadNoteImage(file)
+      if (typeof pos === 'number') {
+        editor.chain().focus().insertContentAt(pos, { type: 'image', attrs: { src: url } }).run()
+      } else {
+        editor.chain().focus().setImage({ src: url }).run()
+      }
+    } catch (err: any) {
+      console.error('Resim yükleme hatası:', err)
+      const msg: string = err?.message || 'bilinmeyen hata'
+      setUploadError(
+        msg.toLowerCase().includes('bucket')
+          ? 'Storage bucket bulunamadı. supabase/schema.sql 9. bölümü çalıştır.'
+          : 'Resim yüklenemedi: ' + msg,
+      )
+    } finally {
+      setIsUploadingImage(false)
+    }
+  }
+
+  // Editör olayları (paste/drop) için her zaman güncel fonksiyona erişim
+  useEffect(() => {
+    uploadImageRef.current = (file: File, pos?: number) => uploadAndInsertImage(file, pos)
+  })
+
   // TIPTAP EDİTÖR KURULUMU
   const editor = useEditor({
     extensions: [
       StarterKit,
+      // allowBase64: true -> ESKİ notlardaki gömülü (base64) resimler görünmeye
+      // devam etsin diye. Yeni eklenen resimler her zaman Storage'a yüklenir.
       Image.configure({ inline: true, allowBase64: true }),
       Placeholder.configure({ placeholder: 'Aklındakileri buraya dök, resimleri doğrudan ekle...' })
     ],
@@ -109,6 +181,36 @@ export function NotesView() {
     onUpdate: ({ editor }) => {
       // Her harf yazıldığında state'i sessizce günceller
       updateActiveNote('content', editor.getHTML())
+    },
+    editorProps: {
+      // Panodan görsel yapıştırma (ekran görüntüsü dahil)
+      handlePaste: (view, event) => {
+        const items = event.clipboardData?.items
+        if (!items) return false
+        for (const item of items) {
+          if (item.type.startsWith('image/')) {
+            const file = item.getAsFile()
+            if (file) {
+              event.preventDefault()
+              void uploadImageRef.current(file, view.state.selection.from)
+              return true
+            }
+          }
+        }
+        return false
+      },
+      // Sürükle-bırak ile görsel ekleme
+      handleDrop: (view, event, _slice, moved) => {
+        if (moved) return false // editör içinde taşınan içerik
+        const files = event.dataTransfer?.files
+        if (!files || files.length === 0) return false
+        const imageFile = Array.from(files).find(f => f.type.startsWith('image/'))
+        if (!imageFile) return false
+        event.preventDefault()
+        const pos = view.posAtCoords({ left: event.clientX, top: event.clientY })?.pos
+        void uploadImageRef.current(imageFile, pos)
+        return true
+      },
     },
   })
 
@@ -172,7 +274,7 @@ export function NotesView() {
     setTimeout(() => setIsSaving(false), 1000)
   }
 
-  // BİLGİSAYARDAN KUSURSUZ RESİM EKLEME
+  // BİLGİSAYARDAN RESİM EKLEME (Storage'a yükler, nota yalnızca URL yazar)
   const handleInsertImage = async () => {
     if (!editor) return
     try {
@@ -180,11 +282,21 @@ export function NotesView() {
         multiple: false,
         filters: [{ name: 'Resimler', extensions: ['png', 'jpg', 'jpeg', 'gif', 'webp'] }]
       })
-      if (selected && typeof selected === 'string') {
-        const safeUrl = convertFileSrc(selected)
-        editor.chain().focus().setImage({ src: safeUrl }).run()
-      }
-    } catch (e) { console.error(e) }
+      if (!selected || typeof selected !== 'string') return
+
+      const fileName = selected.split(/[\\/]/).pop() || 'resim.png'
+      const ext = (fileName.split('.').pop() || 'png').toLowerCase()
+      const mime = ext === 'jpg' || ext === 'jpeg' ? 'image/jpeg' : `image/${ext}`
+
+      // Yerel dosyayı byte olarak oku (read_audio_file genel amaçlı dosya okuyucudur)
+      const bytes = await invoke<number[]>('read_audio_file', { path: selected })
+      const file = new File([new Uint8Array(bytes)], fileName, { type: mime })
+
+      await uploadAndInsertImage(file)
+    } catch (e: any) {
+      console.error(e)
+      setUploadError('Resim eklenemedi: ' + (e?.message || e))
+    }
   }
 
   const handleImportNote = async () => {
@@ -400,10 +512,26 @@ export function NotesView() {
                   
                   <div className="w-px h-5 bg-border mx-2"></div>
                   
-                  <button onClick={handleInsertImage} className="p-2 hover:bg-accent rounded-lg text-muted-foreground hover:text-foreground transition-colors cursor-pointer" title="Bilgisayardan Resim Ekle">
-                    <ImageIcon className="h-4 w-4" />
+                  <button 
+                    onClick={handleInsertImage} 
+                    disabled={isUploadingImage}
+                    className="p-2 hover:bg-accent rounded-lg text-muted-foreground hover:text-foreground transition-colors cursor-pointer disabled:opacity-50" 
+                    title="Bilgisayardan Resim Ekle (sürükle-bırak ve Ctrl+V de çalışır)"
+                  >
+                    {isUploadingImage ? <Loader2 className="h-4 w-4 animate-spin" /> : <ImageIcon className="h-4 w-4" />}
                   </button>
+                  {isUploadingImage && (
+                    <span className="flex items-center gap-1.5 pl-1 pr-2 text-[11px] font-medium text-muted-foreground">
+                      <CloudUpload className="h-3.5 w-3.5" /> Resim yükleniyor...
+                    </span>
+                  )}
                 </div>
+              )}
+
+              {uploadError && (
+                <p className="mb-3 rounded-xl border border-red-500/30 bg-red-500/10 px-4 py-2 text-xs font-medium text-red-400">
+                  {uploadError}
+                </p>
               )}
 
               {/* TIPTAP EDİTÖR EKRANI */}

@@ -231,3 +231,48 @@ begin
 exception when duplicate_object then
   null;
 end $$;
+
+-- ============================================================
+-- 9) NOT RESİMLERİ (Supabase Storage)
+--    Notlara eklenen resimler artık base64 olarak veritabanına
+--    gömülmez; bu bucket'a yüklenir ve nota yalnızca genel URL
+--    yazılır. Böylece DB şişmez ve resimler diğer cihazlarda da görünür.
+--
+--    Bucket: note-images (public = true)
+--    Yazma/silme: yalnızca kendi klasörü -> <user_id>/dosya.png
+--    Okuma: public bucket olduğu için bağlantıyı bilen görüntüleyebilir
+--    (kişisel kullanım için pratik; gizlilik istersen bucket'ı private
+--     yapıp imzalı URL üretimine geçebiliriz).
+-- ============================================================
+
+insert into storage.buckets (id, name, public)
+values ('note-images', 'note-images', true)
+on conflict (id) do update set public = true;
+
+drop policy if exists note_images_insert_own on storage.objects;
+create policy note_images_insert_own on storage.objects
+  for insert to authenticated
+  with check (
+    bucket_id = 'note-images'
+    and (storage.foldername(name))[1] = auth.uid()::text
+  );
+
+drop policy if exists note_images_update_own on storage.objects;
+create policy note_images_update_own on storage.objects
+  for update to authenticated
+  using (
+    bucket_id = 'note-images'
+    and (storage.foldername(name))[1] = auth.uid()::text
+  )
+  with check (
+    bucket_id = 'note-images'
+    and (storage.foldername(name))[1] = auth.uid()::text
+  );
+
+drop policy if exists note_images_delete_own on storage.objects;
+create policy note_images_delete_own on storage.objects
+  for delete to authenticated
+  using (
+    bucket_id = 'note-images'
+    and (storage.foldername(name))[1] = auth.uid()::text
+  );
