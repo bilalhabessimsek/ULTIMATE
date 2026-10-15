@@ -15,21 +15,31 @@ pub struct Track {
     modified_at: u64,
 }
 
-fn get_all_tracks(dir: &Path, tracks: &mut Vec<Track>, id_counter: &mut usize) {
+fn get_all_tracks(root: &Path, dir: &Path, tracks: &mut Vec<Track>) {
     let supported_exts = ["mp3", "m4a", "wav", "flac", "ogg", "aac", "wma", "mid", "midi"];
     if let Ok(entries) = fs::read_dir(dir) {
-        for entry in entries.flatten() {
-            let path = entry.path();
+        // Deterministik sıra: dosya sistemi sırasına güvenmiyoruz,
+        // böylece tarama her seferinde aynı listeyi üretir.
+        let mut paths: Vec<PathBuf> = entries.flatten().map(|e| e.path()).collect();
+        paths.sort();
+
+        for path in paths {
             if path.is_dir() {
-                get_all_tracks(&path, tracks, id_counter);
+                get_all_tracks(root, &path, tracks);
             } else if path.is_file() {
                 if let Some(ext) = path.extension().and_then(|e| e.to_str()) {
                     let ext_lower = ext.to_lowercase();
                     if supported_exts.contains(&ext_lower.as_str()) {
                         let title = path.file_stem().and_then(|n| n.to_str()).unwrap_or("Bilinmeyen Şarkı").to_string();
                         let modified_at = fs::metadata(&path).and_then(|m| m.modified()).ok().and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok()).map(|d| d.as_secs()).unwrap_or(0);
-                        tracks.push(Track { id: format!("trk_{}", *id_counter), title, format: ext_lower.to_uppercase(), path: path.to_string_lossy().into_owned(), modified_at });
-                        *id_counter += 1;
+
+                        // KARARLI ID: taranan kök klasöre göre göreli yol (küçük harf, "/" ayraç).
+                        // trk_1, trk_2... gibi sayaç tabanlı ID'ler her taramada dosya sistemine
+                        // göre kayabildiği için favoriler/playlist'ler yanlış şarkıya işaret ediyordu.
+                        let relative = path.strip_prefix(root).unwrap_or(&path);
+                        let id = relative.to_string_lossy().replace('\\', "/").to_lowercase();
+
+                        tracks.push(Track { id, title, format: ext_lower.to_uppercase(), path: path.to_string_lossy().into_owned(), modified_at });
                     }
                 }
             }
@@ -42,8 +52,7 @@ fn scan_music_folder(folder_path: &str) -> Result<Vec<Track>, String> {
     let path = Path::new(folder_path);
     if !path.exists() || !path.is_dir() { return Err("Klasör bulunamadı.".into()); }
     let mut tracks = Vec::new();
-    let mut id_counter = 1;
-    get_all_tracks(path, &mut tracks, &mut id_counter);
+    get_all_tracks(path, &path, &mut tracks);
     Ok(tracks)
 }
 

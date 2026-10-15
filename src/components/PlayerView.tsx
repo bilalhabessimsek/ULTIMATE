@@ -5,6 +5,7 @@ import { open, save } from '@tauri-apps/plugin-dialog'
 import { cn } from '../lib/utils'
 import * as Tone from 'tone'
 import { Midi } from '@tonejs/midi'
+import { supabase } from '../lib/supabase'
 
 type Track = {
   id: string
@@ -122,8 +123,179 @@ export function PlayerView() {
     const savedCounts = localStorage.getItem('music_playcounts')
     if (savedCounts) setPlayCounts(JSON.parse(savedCounts))
 
-    return () => stopCurrentTrack()
+    // Hatırlanan müzik klasörü varsa açılışta sessizce tara
+    const rememberedFolder = localStorage.getItem('music_folder')
+    if (rememberedFolder) loadTracks(rememberedFolder, true)
+
+    // Bulut verisini (playlist / favori / dinleme sayısı) çek
+    loadCloudMusicData()
+
+    // Diğer cihaz veya pencereden gelen değişiklikleri anında yansıt
+    const channel = supabase
+      .channel('music-realtime')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'playlists' }, () => { loadCloudMusicData() })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'music_state' }, () => { loadCloudMusicData() })
+      .subscribe()
+
+    return () => {
+      supabase.removeChannel(channel)
+      stopCurrentTrack()
+    }
   }, [])
+
+  // ESKİ ID GÖÇÜ: Sayaç tabanlı "trk_N" ID'leri kararlı yollara çevirir (tek seferlik).
+  // Eski veriler tarama sırasına göre üretildiği için aynı sırayla eşleştirmeyi deniyoruz;
+  // eşleşmeyen kayıtlar silinmez, olduğu gibi bırakılır.
+  const migrateLegacyIds = (scannedTracks: Track[]) => {
+    if (localStorage.getItem('music_ids_migrated_v2') === 'done') return
+    if (scannedTracks.length === 0) return
+
+    const idMap: Record<string, string> = {}
+    scannedTracks.forEach((t, i) => { idMap[`trk_${i + 1}`] = t.id })
+    const mapId = (oldId: string) => idMap[oldId] || oldId
+
+    try {
+      const savedFavs = localStorage.getItem('music_favs')
+      if (savedFavs) {
+        const migrated = (JSON.parse(savedFavs) as string[]).map(mapId)
+        setFavorites(migrated)
+        localStorage.setItem('music_favs', JSON.stringify(migrated))
+      }
+
+      const savedPlaylists = localStorage.getItem('music_playlists')
+      if (savedPlaylists) {
+        const lists = JSON.parse(savedPlaylists) as Record<string, string[]>
+        const migrated: Record<string, string[]> = {}
+        for (const [name, ids] of Object.entries(lists)) {
+          migrated[name] = (ids || []).map(mapId)
+        }
+        setPlaylists(migrated)
+        localStorage.setItem('music_playlists', JSON.stringify(migrated))
+      }
+
+      const savedCounts = localStorage.getItem('music_playcounts')
+      if (savedCounts) {
+        const counts = JSON.parse(savedCounts) as Record<string, number>
+        const migrated: Record<string, number> = {}
+        for (const [oldId, count] of Object.entries(counts)) {
+          const newId = mapId(oldId)
+          migrated[newId] = (migrated[newId] || 0) + count
+        }
+        setPlayCounts(migrated)
+        localStorage.setItem('music_playcounts', JSON.stringify(migrated))
+      }
+    } catch (err) {
+      console.error('Eski ID göçü hatası:', err)
+    }
+
+    localStorage.setItem('music_ids_migrated_v2', 'done')
+  }
+
+  const loadTracks = async (folderPath: string, silent = false) => {
+    try {
+      if (!silent) setIsLoading(true)
+      const result = await invoke<Track[]>('scan_music_folder', { folderPath })
+      setTracks(result)
+      migrateLegacyIds(result)
+      pushLocalMusicDataToCloud()
+      if (result.length > 0) setActiveTrack(result[0])
+    } catch (error) {
+      console.error("Hata:", error)
+    } finally {
+      if (!silent) setIsLoading(false)
+    }
+  }
+
+  // ---------------- SUPABASE SENKRONU (playlist + favori + dinleme sayısı) ----------------
+
+  const readLocalJson = <T,>(key: string, fallback: T): T => {
+    try {
+      const raw = localStorage.getItem(key)
+      return raw ? (JSON.parse(raw) as T) : fallback
+    } catch {
+      return fallback
+    }
+  }
+
+  const pushPlaylist = async (name: string, trackIds: string[]) => {
+    const { error } = await supabase
+      .from('playlists')
+      .upsert({ name, track_ids: trackIds, updated_at: new Date().toISOString() })
+    if (error) console.error('Supabase playlist kaydetme hatası:', error)
+  }
+
+  const removePlaylistRemote = async (name: string) => {
+    const { error } = await supabase.from('playlists').delete().eq('name', name)
+    if (error) console.error('Supabase playlist silme hatası:', error)
+  }
+
+  const pushMusicState = async (key: string, value: unknown) => {
+    const { error } = await supabase
+      .from('music_state')
+      .upsert({ key, value, updated_at: new Date().toISOString() })
+    if (error) console.error('Supabase müzik verisi kaydetme hatası:', error)
+  }
+
+  const loadCloudMusicData = async () => {
+    try {
+      const { data: listRows, error: listError } = await supabase.from('playlists').select('name, track_ids')
+      if (listError) throw listError
+
+      const remotePlaylists: Record<string, string[]> = {}
+      for (const row of (listRows || []) as { name: string; track_ids: string[] | null }[]) {
+        remotePlaylists[row.name] = row.track_ids || []
+      }
+
+      if (Object.keys(remotePlaylists).length > 0) {
+        setPlaylists(remotePlaylists)
+        localStorage.setItem('music_playlists', JSON.stringify(remotePlaylists))
+      }
+
+      const { data: stateRows, error: stateError } = await supabase.from('music_state').select('key, value')
+      if (stateError) throw stateError
+
+      const state: Record<string, unknown> = {}
+      for (const row of (stateRows || []) as { key: string; value: unknown }[]) {
+        state[row.key] = row.value
+      }
+
+      if (Array.isArray(state.favorites)) {
+        const favs = state.favorites as string[]
+        setFavorites(favs)
+        localStorage.setItem('music_favs', JSON.stringify(favs))
+      }
+
+      if (state.play_counts && typeof state.play_counts === 'object') {
+        const counts = state.play_counts as Record<string, number>
+        setPlayCounts(counts)
+        localStorage.setItem('music_playcounts', JSON.stringify(counts))
+      }
+    } catch (err) {
+      console.error('Supabase müzik verisi çekilemedi:', err)
+    }
+  }
+
+  // Yereldeki müzik verisini buluta bir kez taşır (ilk kurulum göçü).
+  // Bulut zaten doluysa yukarıdaki çekme işlemi yereli bulutla eşitlediği için
+  // bu göç sadece aynı veriyi tekrar yazmış olur; zararsız.
+  const pushLocalMusicDataToCloud = async () => {
+    if (localStorage.getItem('music_cloud_migrated_v2') === 'done') return
+
+    const lists = readLocalJson<Record<string, string[]>>('music_playlists', {})
+    const names = Object.keys(lists)
+    if (names.length > 0) {
+      const { error } = await supabase
+        .from('playlists')
+        .upsert(names.map((name) => ({ name, track_ids: lists[name], updated_at: new Date().toISOString() })))
+      if (error) console.error('Playlist göçü hatası:', error)
+    }
+
+    const favs = readLocalJson<string[]>('music_favs', [])
+    if (favs.length > 0) await pushMusicState('favorites', favs)
+
+    const counts = readLocalJson<Record<string, number>>('music_playcounts', {})
+    if (Object.keys(counts).length > 0) await pushMusicState('play_counts', counts)
+  }
 
   const stopCurrentTrack = () => {
     if (audioRef.current) {
@@ -141,15 +313,11 @@ export function PlayerView() {
     try {
       const selectedFolder = await open({ directory: true, multiple: false })
       if (selectedFolder && typeof selectedFolder === 'string') {
-        setIsLoading(true);
-        const result = await invoke<Track[]>('scan_music_folder', { folderPath: selectedFolder })
-        setTracks(result);
-        if (result.length > 0) setActiveTrack(result[0])
+        localStorage.setItem('music_folder', selectedFolder)
+        await loadTracks(selectedFolder)
       }
     } catch (error) {
       console.error("Hata:", error)
-    } finally {
-      setIsLoading(false)
     }
   }
 
@@ -173,6 +341,7 @@ export function PlayerView() {
     const newCounts = { ...playCounts, [track.id]: (playCounts[track.id] || 0) + 1 }
     setPlayCounts(newCounts)
     localStorage.setItem('music_playcounts', JSON.stringify(newCounts))
+    pushMusicState('play_counts', newCounts)
 
     if ('mediaSession' in navigator) {
       navigator.mediaSession.metadata = new MediaMetadata({ title: track.title, artist: 'Ultimate Oynatıcı' })
@@ -324,6 +493,7 @@ export function PlayerView() {
     const newFavs = favorites.includes(id) ? favorites.filter(fav => fav !== id) : [...favorites, id]
     setFavorites(newFavs)
     localStorage.setItem('music_favs', JSON.stringify(newFavs))
+    pushMusicState('favorites', newFavs)
   }
 
   const handleSeek = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -364,6 +534,7 @@ export function PlayerView() {
     const newPlaylists = { ...playlists, [newListName.trim()]: [] }
     setPlaylists(newPlaylists)
     localStorage.setItem('music_playlists', JSON.stringify(newPlaylists))
+    pushPlaylist(newListName.trim(), [])
     setNewListName('')
   }
 
@@ -374,6 +545,7 @@ export function PlayerView() {
     delete newPlaylists[name]
     setPlaylists(newPlaylists)
     localStorage.setItem('music_playlists', JSON.stringify(newPlaylists))
+    removePlaylistRemote(name)
     if (currentPlaylist === name) { setRightPanelMode('dash'); setCurrentPlaylist(null) }
   }
 
@@ -383,18 +555,22 @@ export function PlayerView() {
     if (!trackId) return
     const currentList = playlists[listName] || []
     if (!currentList.includes(trackId)) {
-      const newPlaylists = { ...playlists, [listName]: [...currentList, trackId] }
+      const newList = [...currentList, trackId]
+      const newPlaylists = { ...playlists, [listName]: newList }
       setPlaylists(newPlaylists)
       localStorage.setItem('music_playlists', JSON.stringify(newPlaylists))
+      pushPlaylist(listName, newList)
     }
   }
 
   const removeTrackFromPlaylist = (e: React.MouseEvent | any, trackId: string, listName: string) => {
     if(e.stopPropagation) e.stopPropagation()
     const currentList = playlists[listName] || []
-    const newPlaylists = { ...playlists, [listName]: currentList.filter(id => id !== trackId) }
+    const newList = currentList.filter(id => id !== trackId)
+    const newPlaylists = { ...playlists, [listName]: newList }
     setPlaylists(newPlaylists)
     localStorage.setItem('music_playlists', JSON.stringify(newPlaylists))
+    pushPlaylist(listName, newList)
   }
 
   const downloadTxt = async (filename: string, content: string) => {
