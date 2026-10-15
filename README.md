@@ -199,3 +199,18 @@ Uygulama yapıştırılan metinden `token=` değerini ayıklar ve `supabase.auth
 > Kod alanı da desteklenir: e-postada 6 haneli kod varsa (custom SMTP + `{{ .Token }}` şablonu kuruluysa) doğrudan o kod girilebilir.
 > Bağlantının geçerlilik süresi: Authentication → Providers → Email → *Email OTP Expiry* (varsayılan 3600 sn).
 
+---
+
+## 📅 Sürüm Geçmişi
+
+Güncel sürüm: **1.3.0**. Ayrıntılı sürüm notları için [CHANGELOG.md](CHANGELOG.md) dosyasına bakın.
+
+| Sürüm | Tarih | Öne çıkan değişiklik |
+| :---: | :---: | --- |
+| **1.3.0** | 16.10.2026 | Not resimleri Supabase Storage'a yükleniyor (base64 gömme kaldırıldı) |
+| 1.2.1 | 16.10.2026 | Şifre sıfırlama: bağlantı yapıştırma (SMTP gerekmez) |
+| 1.2.0 | 15.10.2026 | 6 haneli kodla şifre sıfırlama akışı |
+| 1.1.1 | 15.10.2026 | Hesap bazlı yerel depolama (hesaplar arası veri sızması giderildi) |
+| 1.1.0 | 15.10.2026 | Hesaba bağlı Supabase senkronu ve RLS koruması |
+| 1.0.0 | 30.08.2026 | İlk sürüm (Player, Projects, CV, Notlar, Takvim) |
+
