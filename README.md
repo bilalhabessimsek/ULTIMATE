@@ -214,3 +214,30 @@ Güncel sürüm: **1.3.0**. Ayrıntılı sürüm notları için [CHANGELOG.md](C
 | 1.1.0 | 15.10.2026 | Hesaba bağlı Supabase senkronu ve RLS koruması |
 | 1.0.0 | 30.08.2026 | İlk sürüm (Player, Projects, CV, Notlar, Takvim) |
 
+---
+
+## 🤖 Otomatik Sürüm (GitHub Actions)
+
+`v*` biçiminde bir tag push edildiğinde **GitHub Actions** Windows üzerinde otomatik derler, Release oluşturur ve `.msi` + `-setup.exe` dosyalarını ekler (`.github/workflows/release.yml`).
+
+```bash
+# Sürümleri güncelle (package.json, src-tauri/tauri.conf.json, src-tauri/Cargo.toml),
+# commit'le, tag at ve push et:
+git add -A
+git commit -m "Surum 1.4.0: ..."
+git tag -a v1.4.0 -m "ULTIMATE v1.4.0"
+git push origin main
+git push origin v1.4.0
+```
+
+> Workflow, tag adındaki sürümü (`v1.4.0` → `1.4.0`) `tauri.conf.json`, `package.json` ve `Cargo.toml` içine otomatik yazar; böylece kurulum paketinin sürümü tag ile her zaman aynı olur.
+
+**Gerekli repository secret'ları** (Settings → Secrets and variables → Actions):
+
+| Secret | Açıklama |
+|---|---|
+| `VITE_SUPABASE_URL` | Supabase Project URL |
+| `VITE_SUPABASE_ANON_KEY` | Supabase Publishable key |
+
+> Bu ikisi eksikse workflow erken adımda hata verir; böylece Supabase'siz (bozuk) bir paket yayınlanmaz.
+

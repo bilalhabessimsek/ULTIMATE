@@ -1,0 +1,85 @@
+name: Release
+
+# v* ile baslayan bir tag push edildiginde otomatik calisir.
+# Ornek:  git tag -a v1.4.0 -m "ULTIMATE v1.4.0"  &&  git push origin v1.4.0
+on:
+  push:
+    tags:
+      - 'v*'
+
+# tauri-action'in Release olusturup asset yukleyebilmesi icin gerekli
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: Build & Release (Windows)
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Rust
+        uses: swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri -> target
+
+      # Tag adindaki surumu (v1.4.0 -> 1.4.0) proje dosyalarina yazar,
+      # boylece kurulum paketi surumu ile tag her zaman ayni olur.
+      - name: Sync version from tag
+        shell: pwsh
+        run: |
+          $ver = "${{ github.ref_name }}".TrimStart('v')
+          Write-Host "Tag surumu: $ver"
+          $enc = New-Object System.Text.UTF8Encoding($false)
+          $targets = @(
+            @{ File = 'src-tauri/tauri.conf.json'; Pattern = '("version"\s*:\s*")[^"]*(")' },
+            @{ File = 'package.json';              Pattern = '("version"\s*:\s*")[^"]*(")' },
+            @{ File = 'src-tauri/Cargo.toml';      Pattern = '(?m)^(version\s*=\s*")[^"]*(")' }
+          )
+          foreach ($t in $targets) {
+            $txt = [IO.File]::ReadAllText($t.File)
+            $rx  = [regex]::new($t.Pattern)
+            $out = $rx.Replace($txt, '${1}' + $ver + '${2}', 1)
+            [IO.File]::WriteAllText($t.File, $out, $enc)
+            Write-Host "Guncellendi: $($t.File)"
+          }
+
+      - name: Install dependencies
+        run: npm ci
+
+      # Supabase anahtarlari frontend'e gomulur; eksikse build kirilgan bir
+      # uygulama uretir. Erken uyari icin secret'lari burada kontrol ederiz.
+      - name: Verify Supabase secrets
+        shell: pwsh
+        env:
+          VITE_SUPABASE_URL: ${{ secrets.VITE_SUPABASE_URL }}
+          VITE_SUPABASE_ANON_KEY: ${{ secrets.VITE_SUPABASE_ANON_KEY }}
+        run: |
+          if ([string]::IsNullOrWhiteSpace($env:VITE_SUPABASE_URL)) { throw "Eksik secret: VITE_SUPABASE_URL" }
+          if ([string]::IsNullOrWhiteSpace($env:VITE_SUPABASE_ANON_KEY)) { throw "Eksik secret: VITE_SUPABASE_ANON_KEY" }
+          Write-Host "Supabase secret'lari mevcut."
+
+      # Tauri'yi derler, .msi + NSIS setup.exe uretir ve Release'e ekler.
+      - name: Build & publish release
+        uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VITE_SUPABASE_URL: ${{ secrets.VITE_SUPABASE_URL }}
+          VITE_SUPABASE_ANON_KEY: ${{ secrets.VITE_SUPABASE_ANON_KEY }}
+        with:
+          tagName: ${{ github.ref_name }}
+          releaseName: 'ULTIMATE ${{ github.ref_name }}'
+          releaseBody: 'Kurulum dosyalari asagida. Degisiklik gunlugu: https://github.com/bilalhabessimsek/ULTIMATE/blob/main/CHANGELOG.md'
+          releaseDraft: false
+          prerelease: false
