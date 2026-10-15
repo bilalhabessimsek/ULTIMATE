@@ -116,9 +116,94 @@ begin
   end if;
 end $$;
 
--- ------------------------------------------------------------
--- 6) Realtime yayını (zaten üye ise sessizce geçer)
--- ------------------------------------------------------------
+-- ============================================================
+-- 7) KİMLİK DOĞRULAMA (Auth) GEÇİŞİ
+--    ÖNEMLİ: Bu bölümü çalıştırmadan önce Dashboard ->
+--    Authentication -> Users ekranından bir kullanıcı oluştur
+--    (email + şifre, "Auto Confirm" işaretli olsun).
+--    Aksi halde bu bölüm uyarı verip durur.
+-- ============================================================
+
+-- Her tabloya sahip kolonu ekle (varsayılan: giriş yapan kullanıcı)
+alter table public.notes add column if not exists user_id uuid default auth.uid();
+alter table public.calendar_events add column if not exists user_id uuid default auth.uid();
+alter table public.playlists add column if not exists user_id uuid default auth.uid();
+alter table public.music_state add column if not exists user_id uuid default auth.uid();
+
+do $$
+declare
+  owner_id uuid;
+begin
+  select id into owner_id from auth.users order by created_at limit 1;
+
+  if owner_id is null then
+    raise exception 'Once Authentication -> Users bolumunden bir kullanici olustur, sonra bu SQL''i tekrar calistir.';
+  end if;
+
+  -- Mevcut (sahipsiz) satırları bu kullanıcıya bağla
+  update public.notes set user_id = owner_id where user_id is null;
+  update public.calendar_events set user_id = owner_id where user_id is null;
+  update public.playlists set user_id = owner_id where user_id is null;
+  update public.music_state set user_id = owner_id where user_id is null;
+
+  alter table public.notes alter column user_id set not null;
+  alter table public.calendar_events alter column user_id set not null;
+  alter table public.playlists alter column user_id set not null;
+  alter table public.music_state alter column user_id set not null;
+
+  -- playlists / music_state anahtarları kullanıcıya göre bileşik olmalı
+  alter table public.playlists drop constraint if exists playlists_pkey;
+  alter table public.playlists add constraint playlists_pkey primary key (user_id, name);
+  alter table public.music_state drop constraint if exists music_state_pkey;
+  alter table public.music_state add constraint music_state_pkey primary key (user_id, key);
+end $$;
+
+-- GEVŞEK POLİTİKALARI SİL (bunlar kalsaydı yeni politikalar devre dışı kalırdı,
+-- çünkü Postgres politikaları varsayılan olarak VEYA ile birleştirir)
+drop policy if exists notes_select on public.notes;
+drop policy if exists notes_insert on public.notes;
+drop policy if exists notes_update on public.notes;
+drop policy if exists notes_delete on public.notes;
+drop policy if exists calendar_select on public.calendar_events;
+drop policy if exists calendar_insert on public.calendar_events;
+drop policy if exists calendar_update on public.calendar_events;
+drop policy if exists calendar_delete on public.calendar_events;
+drop policy if exists playlists_select on public.playlists;
+drop policy if exists playlists_insert on public.playlists;
+drop policy if exists playlists_update on public.playlists;
+drop policy if exists playlists_delete on public.playlists;
+drop policy if exists music_state_select on public.music_state;
+drop policy if exists music_state_insert on public.music_state;
+drop policy if exists music_state_update on public.music_state;
+drop policy if exists music_state_delete on public.music_state;
+
+-- Sadece kendi satırlarına erişim
+create policy notes_select on public.notes for select using (auth.uid() = user_id);
+create policy notes_insert on public.notes for insert with check (auth.uid() = user_id);
+create policy notes_update on public.notes for update using (auth.uid() = user_id) with check (auth.uid() = user_id);
+create policy notes_delete on public.notes for delete using (auth.uid() = user_id);
+
+create policy calendar_select on public.calendar_events for select using (auth.uid() = user_id);
+create policy calendar_insert on public.calendar_events for insert with check (auth.uid() = user_id);
+create policy calendar_update on public.calendar_events for update using (auth.uid() = user_id) with check (auth.uid() = user_id);
+create policy calendar_delete on public.calendar_events for delete using (auth.uid() = user_id);
+
+create policy playlists_select on public.playlists for select using (auth.uid() = user_id);
+create policy playlists_insert on public.playlists for insert with check (auth.uid() = user_id);
+create policy playlists_update on public.playlists for update using (auth.uid() = user_id) with check (auth.uid() = user_id);
+create policy playlists_delete on public.playlists for delete using (auth.uid() = user_id);
+
+create policy music_state_select on public.music_state for select using (auth.uid() = user_id);
+create policy music_state_insert on public.music_state for insert with check (auth.uid() = user_id);
+create policy music_state_update on public.music_state for update using (auth.uid() = user_id) with check (auth.uid() = user_id);
+create policy music_state_delete on public.music_state for delete using (auth.uid() = user_id);
+
+-- ============================================================
+-- 8) REALTIME YAYINI (zaten üye ise sessizce geçer)
+--    Not: Supabase Realtime servisi yeni eklenen tabloları
+--    birkaç dakika gecikmeyle alabilir; ilk anda olay gelmezse
+--    birkaç dakika sonra tekrar dene.
+-- ============================================================
 do $$
 begin
   alter publication supabase_realtime add table public.notes;

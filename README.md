@@ -60,6 +60,7 @@ Sistem kaynaklarını minimum düzeyde tüketirken; akıllı müzik çalar, proj
 ---
 
 ### ☁️ 5. Bulut Senkronu (Supabase)
+* **Hesaba Bağlı Güvenlik:** Giriş e-posta + şifre ile yapılır; tüm tablolar **RLS** ile korunur (`auth.uid() = user_id`). Uygulamanın içindeki publishable key'i ele geçiren biri, senin hesabına giriş yapmadıkça verilerine erişemez.
 * **Anlık Yedekleme:** Notlar `Ctrl+S` ile hem yerel dosyaya hem **Supabase** `notes` tablosuna yazılır.
 * **Takvim Senkronu:** Takvim etkinlikleri `calendar_events` tablosunda tutulur; uygulama ilk açılışta yereldeki (`localStorage`) eski etkinlikleri otomatik olarak buluta taşır.
 * **Müzik Senkronu:** Çalma listeleri (`playlists`), favoriler ve dinleme sayıları (`music_state`) bulutta tutulur; başka bir cihazda aynı liste ve favoriler hazır gelir.
@@ -156,5 +157,21 @@ Notların bulutta senkronize olması için tek seferlik kurulum gerekir:
 curl -s -H "apikey: $VITE_SUPABASE_ANON_KEY" \
   "https://<proje-ref>.supabase.co/rest/v1/notes?select=id&limit=1"
 ```
-`[]` veya JSON listesi döndüyse bağlantı çalışıyor demektir.
+`[]` veya JSON listesi döndüyse bağlantı çalışıyor demektir (giriş yapılmadığı için boş liste normaldir).
+
+---
+
+## 🔐 Kimlik Doğrulama (Auth)
+
+Notlar, takvim ve listeler artık **hesaba bağlı**. Satır Düzeyi Güvenlik (RLS) politikaları `auth.uid() = user_id` şeklinde olduğu için publishable key'e sahip başka biri **kendi hesabı olmadan verilerini göremez**.
+
+Kurulum sırası önemli:
+
+1. Dashboard → **Authentication → Users** → *Add user* → e-posta + şifre gir, **Auto Confirm** işaretli olsun.
+2. `supabase/schema.sql` dosyasının tamamını SQL editöründe çalıştır (7. bölüm sahipsiz eski satırları otomatik olarak bu kullanıcıya bağlar).
+3. Uygulamayı aç → giriş ekranı gelir → aynı e-posta/şifre ile giriş yap.
+
+> E-posta onayı zorunlu olsun istemiyorsan: Authentication → Sign In / Providers → Email → **Confirm email** kapalı olabilir. Kapalıysa hesap oluşturur oluşturmaz giriş yapılır.
+
+Oturum yerelde saklandığı için uygulama her açılışta tekrar giriş istemez; çıkış için sol menüdeki **çıkış (LogOut)** butonu kullanılır.
 

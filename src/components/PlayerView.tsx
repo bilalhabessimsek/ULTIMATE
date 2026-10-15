@@ -6,6 +6,7 @@ import { cn } from '../lib/utils'
 import * as Tone from 'tone'
 import { Midi } from '@tonejs/midi'
 import { supabase } from '../lib/supabase'
+import { getUserId } from '../lib/auth'
 
 type Track = {
   id: string
@@ -225,21 +226,33 @@ export function PlayerView() {
   }
 
   const pushPlaylist = async (name: string, trackIds: string[]) => {
+    const userId = await getUserId()
+    if (!userId) return
     const { error } = await supabase
       .from('playlists')
-      .upsert({ name, track_ids: trackIds, updated_at: new Date().toISOString() })
+      .upsert(
+        { user_id: userId, name, track_ids: trackIds, updated_at: new Date().toISOString() },
+        { onConflict: 'user_id,name' }
+      )
     if (error) console.error('Supabase playlist kaydetme hatası:', error)
   }
 
   const removePlaylistRemote = async (name: string) => {
-    const { error } = await supabase.from('playlists').delete().eq('name', name)
+    const userId = await getUserId()
+    if (!userId) return
+    const { error } = await supabase.from('playlists').delete().eq('user_id', userId).eq('name', name)
     if (error) console.error('Supabase playlist silme hatası:', error)
   }
 
   const pushMusicState = async (key: string, value: unknown) => {
+    const userId = await getUserId()
+    if (!userId) return
     const { error } = await supabase
       .from('music_state')
-      .upsert({ key, value, updated_at: new Date().toISOString() })
+      .upsert(
+        { user_id: userId, key, value, updated_at: new Date().toISOString() },
+        { onConflict: 'user_id,key' }
+      )
     if (error) console.error('Supabase müzik verisi kaydetme hatası:', error)
   }
 
@@ -288,12 +301,18 @@ export function PlayerView() {
   const pushLocalMusicDataToCloud = async () => {
     if (localStorage.getItem('music_cloud_migrated_v2') === 'done') return
 
+    const userId = await getUserId()
+    if (!userId) return
+
     const lists = readLocalJson<Record<string, string[]>>('music_playlists', {})
     const names = Object.keys(lists)
     if (names.length > 0) {
       const { error } = await supabase
         .from('playlists')
-        .upsert(names.map((name) => ({ name, track_ids: lists[name], updated_at: new Date().toISOString() })))
+        .upsert(
+          names.map((name) => ({ user_id: userId, name, track_ids: lists[name], updated_at: new Date().toISOString() })),
+          { onConflict: 'user_id,name' }
+        )
       if (error) console.error('Playlist göçü hatası:', error)
     }
 
