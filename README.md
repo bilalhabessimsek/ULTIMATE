@@ -62,6 +62,8 @@ Sistem kaynaklarını minimum düzeyde tüketirken; akıllı müzik çalar, proj
 ### ☁️ 5. Bulut Senkronu (Supabase)
 * **Anlık Yedekleme:** Notlar `Ctrl+S` ile hem yerel dosyaya hem **Supabase** `notes` tablosuna yazılır.
 * **Takvim Senkronu:** Takvim etkinlikleri `calendar_events` tablosunda tutulur; uygulama ilk açılışta yereldeki (`localStorage`) eski etkinlikleri otomatik olarak buluta taşır.
+* **Müzik Senkronu:** Çalma listeleri (`playlists`), favoriler ve dinleme sayıları (`music_state`) bulutta tutulur; başka bir cihazda aynı liste ve favoriler hazır gelir.
+* **Kararlı Şarkı Kimlikleri:** Şarkıların kimliği taranan kök klasöre göre göreli yoldur (ör. `rock/parca.mp3`). Böylece müzik klasörü yeniden tarandığında favori ve listeler **yanlış şarkıya işaret etmez**; klasör hatırlanır ve açılışta otomatik taranır.
 * **Realtime:** Aynı hesaptan açılan diğer pencereler/cihazlar, veritabanı olaylarını (**INSERT/UPDATE/DELETE**) kanal üzerinden dinleyerek listeleri anında günceller.
 * **Offline-first:** Bağlantı yoksa uygulama `localStorage`'a düşer; takvim başlığında küçük bir "yerel" rozeti görünür ve kullanım kesintisiz devam eder.
 * **Şema:** Tüm tablolar, RLS politikaları ve realtime ayarları `supabase/schema.sql` dosyasındadır.

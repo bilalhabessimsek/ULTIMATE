@@ -100,8 +100,15 @@ export function CalendarView() {
       )
       .subscribe()
 
+    // YEDEK SENKRON: realtime gecikirse pencere öne geldiğinde bir kez tazele
+    const refreshOnFocus = () => { syncNow() }
+    window.addEventListener('focus', refreshOnFocus)
+    document.addEventListener('visibilitychange', refreshOnFocus)
+
     return () => {
       cancelled = true
+      window.removeEventListener('focus', refreshOnFocus)
+      document.removeEventListener('visibilitychange', refreshOnFocus)
       supabase.removeChannel(channel)
     }
   }, [])

@@ -137,7 +137,14 @@ export function PlayerView() {
       .on('postgres_changes', { event: '*', schema: 'public', table: 'music_state' }, () => { loadCloudMusicData() })
       .subscribe()
 
+    // YEDEK SENKRON: realtime gecikirse pencere öne geldiğinde bir kez tazele
+    const refreshOnFocus = () => { loadCloudMusicData() }
+    window.addEventListener('focus', refreshOnFocus)
+    document.addEventListener('visibilitychange', refreshOnFocus)
+
     return () => {
+      window.removeEventListener('focus', refreshOnFocus)
+      document.removeEventListener('visibilitychange', refreshOnFocus)
       supabase.removeChannel(channel)
       stopCurrentTrack()
     }
